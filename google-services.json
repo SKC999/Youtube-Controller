@@ -1,0 +1,54 @@
+{
+  "project_info": {
+    "project_number": "398239762640",
+    "project_id": "youtube-controller-app-461116",
+    "storage_bucket": "youtube-controller-app-461116.appspot.com"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:398239762640:android:YOUR_APP_ID",
+        "android_client_info": {
+          "package_name": "com.locusflow.youtubecontroller"
+        }
+      },
+      "oauth_client": [
+        {
+          "client_id": "398239762640-rnkjam0p4465t3qu0j587hdt3trtgq40.apps.googleusercontent.com",
+          "client_type": 1,
+          "android_info": {
+            "package_name": "com.locusflow.youtubecontroller",
+            "certificate_hash": "093b239e855483ba6af0e7e74efe6422390217a5"
+          }
+        },
+        {
+          "client_id": "398239762640-h0nlkqbidfout500g51buq6tmngps418.apps.googleusercontent.com",
+          "client_type": 3
+        }
+      ],
+      "api_key": [
+        {
+          "current_key": "YOUR_ANDROID_API_KEY"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": [
+            {
+              "client_id": "398239762640-h0nlkqbidfout500g51buq6tmngps418.apps.googleusercontent.com",
+              "client_type": 3
+            },
+            {
+              "client_id": "398239762640-pcssb2kt1sf9ivsfmuouguiho27o8ssh.apps.googleusercontent.com",
+              "client_type": 2,
+              "ios_info": {
+                "bundle_id": "com.locusflow.youtubecontroller"
+              }
+            }
+          ]
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

@@ -1,0 +1,51 @@
+{
+  "expo": {
+    "name": "YouTube Controller",
+    "slug": "youtube-controller",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "icon": "./assets/icon.png",
+    "userInterfaceStyle": "light",
+    "splash": {
+      "image": "./assets/splash.png",
+      "resizeMode": "contain",
+      "backgroundColor": "#ffffff"
+    },
+    "assetBundlePatterns": [
+      "**/*"
+    ],
+    "ios": {
+      "supportsTablet": true,
+      "bundleIdentifier": "com.locusflow.youtubecontroller",
+      "buildNumber": "12",
+      "deploymentTarget": "14.0",
+      "infoPlist": {
+        "ITSAppUsesNonExemptEncryption": false,
+        "NSAppTransportSecurity": {
+          "NSAllowsArbitraryLoads": false,
+          "NSExceptionDomains": {}
+        }
+      }
+    },
+    "android": {
+      "adaptiveIcon": {
+        "foregroundImage": "./assets/adaptive-icon.png",
+        "backgroundColor": "#FFFFFF"
+      },
+      "permissions": [],
+      "package": "com.locusflow.youtubecontroller"
+    },
+    "web": {
+      "favicon": "./assets/favicon.png"
+    },
+    "extra": {
+      "eas": {
+        "projectId": "736bcf92-94da-4e15-bf32-aabba2d5ac37"
+      }
+    },
+    "owner": "locusflow",
+    "plugins": [
+      "expo-secure-store"
+    ]
+  }
+}
