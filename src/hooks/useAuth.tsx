@@ -1,10 +1,8 @@
-import { useState, useEffect, useCallback } from 'react';
-import AsyncStorage from '@react-native-async-storage/async-storage';
-import * as WebBrowser from 'expo-web-browser';
+import { useState, useEffect, useCallback, createContext, useContext } from 'react';
 import * as Google from 'expo-auth-session/providers/google';
-import * as SecureStore from 'expo-secure-store';
-import Constants from 'expo-constants';
-import { ENV, validateEnvironment } from '../config/environment';
+import * as WebBrowser from 'expo-web-browser';
+import AsyncStorage from '@react-native-async-storage/async-storage';
+import { ENV } from '../config/env';
 
 WebBrowser.maybeCompleteAuthSession();
 
@@ -12,488 +10,249 @@ export interface AuthUser {
   id: string;
   name: string;
   email: string;
-  photo?: string;
-  accessToken: string;
+  picture?: string;
+  accessToken?: string;
   refreshToken?: string;
-  expiresAt?: number;
 }
 
-interface AuthError {
+export interface AuthError {
   code: string;
   message: string;
   details?: any;
 }
 
-const STORAGE_KEY = 'youtube-controller-user';
-const SECURE_STORAGE_KEY = 'youtube-controller-tokens';
+interface AuthContextType {
+  user: AuthUser | null;
+  isAuthenticated: boolean;
+  isSigningIn: boolean;
+  error: AuthError | null;
+  signIn: () => Promise<boolean>;
+  signOut: () => Promise<void>;
+  handleManualToken: (token: string) => Promise<boolean>;
+}
 
-// Validate environment on load
-validateEnvironment();
+const AuthContext = createContext<AuthContextType | null>(null);
 
 export const useAuth = () => {
+  const context = useContext(AuthContext);
+  if (!context) {
+    throw new Error('useAuth must be used within an AuthProvider');
+  }
+  return context;
+};
+
+export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
   const [user, setUser] = useState<AuthUser | null>(null);
-  const [loading, setLoading] = useState(true);
   const [isSigningIn, setIsSigningIn] = useState(false);
   const [error, setError] = useState<AuthError | null>(null);
 
-  // Configure Google Auth with proper client IDs
+  // For iOS OAuth clients, use the reversed client ID as redirect URI
+  const iosRedirectUri = `com.googleusercontent.apps.398239762640-pcssb2kt1sf9ivsfmuouguiho27o8ssh://`;
+
   const [request, response, promptAsync] = Google.useAuthRequest({
-    clientId: ENV.GOOGLE_WEB_CLIENT_ID,
-    iosClientId: ENV.GOOGLE_IOS_CLIENT_ID,
-    androidClientId: ENV.GOOGLE_ANDROID_CLIENT_ID,
+    // Use the iOS client ID
+    clientId: ENV.GOOGLE_IOS_CLIENT_ID,
     scopes: ENV.GOOGLE_SCOPES,
     responseType: 'code',
     shouldAutoExchangeCode: true,
+    // Use the reversed client ID as redirect URI (required for iOS OAuth clients)
+    redirectUri: iosRedirectUri,
     extraParams: {
       access_type: 'offline',
-      prompt: 'consent', // Force consent to get refresh token
+      prompt: 'consent',
     },
   });
 
+  // Log configuration
   useEffect(() => {
-    initializeAuth();
+    console.log('iOS OAuth Configuration:', {
+      clientId: ENV.GOOGLE_IOS_CLIENT_ID,
+      redirectUri: iosRedirectUri,
+      scopes: ENV.GOOGLE_SCOPES,
+    });
   }, []);
 
+  // Log response changes for debugging
   useEffect(() => {
-    handleAuthResponse();
+    console.log('Response changed:', response?.type || 'null');
+    if (response) {
+      console.log('Full response object:', JSON.stringify(response, null, 2));
+    }
   }, [response]);
 
-  const initializeAuth = async () => {
-    try {
-      setLoading(true);
-      await checkStoredUser();
-    } catch (error) {
-      console.error('Auth initialization error:', error);
-      setError({
-        code: 'INIT_ERROR',
-        message: 'Failed to initialize authentication',
-        details: error
-      });
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  const checkStoredUser = async (): Promise<AuthUser | null> => {
-    try {
-      // Get user data from storage
-      const storedUser = await AsyncStorage.getItem(STORAGE_KEY);
-      if (!storedUser) return null;
-
-      const userData = JSON.parse(storedUser);
+  // Handle OAuth response
+  useEffect(() => {
+    if (response?.type === 'success') {
+      console.log('Auth response received: success');
+      console.log('Full response:', JSON.stringify(response, null, 2));
       
-      // Get secure token data
-      try {
-        const secureData = await SecureStore.getItemAsync(SECURE_STORAGE_KEY);
-        if (secureData) {
-          const tokenData = JSON.parse(secureData);
-          userData.accessToken = tokenData.accessToken;
-          userData.refreshToken = tokenData.refreshToken;
-          userData.expiresAt = tokenData.expiresAt;
-        }
-      } catch (secureError) {
-        console.warn('Failed to get secure token data:', secureError);
-      }
-      
-      // Check if we have required token data
-      if (!userData.accessToken) {
-        await clearStoredAuth();
-        return null;
-      }
-      
-      // Check if token is still valid
-      if (await isTokenValid(userData.accessToken)) {
-        setUser(userData);
-        return userData;
-      }
-      
-      // Try to refresh token if available
-      if (userData.refreshToken) {
-        const refreshedUser = await refreshUserToken(userData);
-        if (refreshedUser) {
-          setUser(refreshedUser);
-          return refreshedUser;
-        }
-      }
-      
-      // Token invalid and can't refresh, clear storage
-      await clearStoredAuth();
-    } catch (error) {
-      console.error('Error checking stored user:', error);
-      await clearStoredAuth();
-    }
-    return null;
-  };
-
-  const handleAuthResponse = async () => {
-    if (!response) return;
-
-    try {
-      if (response.type === 'success') {
-        setIsSigningIn(true);
-        const { authentication } = response;
-        
-        if (authentication?.accessToken) {
-          await fetchUserInfo(
-            authentication.accessToken, 
-            authentication.refreshToken || undefined
-          );
-        } else {
-          throw new Error('No access token received');
-        }
-      } else if (response.type === 'error') {
-        const errorMessage = response.error?.message || 'Authentication failed';
-        console.error('Auth error:', response.error);
-        
+      if (response.authentication?.accessToken) {
+        fetchUserInfo(response.authentication.accessToken, response.authentication.refreshToken);
+      } else {
+        console.error('No access token in response');
         setError({
-          code: 'AUTH_ERROR',
-          message: errorMessage,
-          details: response.error
+          code: 'NO_TOKEN',
+          message: 'Authentication completed but no access token received.',
         });
-        
-        // User-friendly error messages
-        if (errorMessage.includes('popup_closed')) {
-          setError({
-            code: 'AUTH_CANCELLED',
-            message: 'Sign-in was cancelled. Please try again.',
-            details: response.error
-          });
-        }
-      } else if (response.type === 'dismiss' || response.type === 'cancel') {
-        console.log('Auth dismissed by user');
+        setIsSigningIn(false);
       }
-    } catch (error) {
-      console.error('Auth response handling error:', error);
+    } else if (response?.type === 'error') {
+      console.log('Auth response received: error');
+      console.log('Full response:', JSON.stringify(response, null, 2));
       setError({
-        code: 'RESPONSE_ERROR',
-        message: 'Failed to complete sign-in. Please try again.',
-        details: error
+        code: 'AUTH_ERROR',
+        message: response.error?.message || 'Authentication failed.',
+        details: response.error,
       });
-    } finally {
+      setIsSigningIn(false);
+    } else if (response?.type === 'cancel') {
+      console.log('Auth response received: cancel');
+      console.log('User cancelled authentication');
       setIsSigningIn(false);
     }
-  };
+  }, [response]);
 
-  const isTokenValid = async (accessToken: string): Promise<boolean> => {
+  const fetchUserInfo = useCallback(async (accessToken: string, refreshToken?: string) => {
     try {
-      const response = await fetch('https://www.googleapis.com/oauth2/v1/tokeninfo', {
-        method: 'GET',
-        headers: {
-          'Authorization': `Bearer ${accessToken}`
-        }
-      });
+      console.log('Fetching user info with token:', accessToken.substring(0, 20) + '...');
       
-      if (response.ok) {
-        const tokenInfo = await response.json();
-        // Valid if more than 5 minutes left
-        return tokenInfo.expires_in > 300;
-      }
-      
-      return false;
-    } catch (error) {
-      console.error('Token validation error:', error);
-      return false;
-    }
-  };
-
-  const refreshUserToken = async (userData: AuthUser): Promise<AuthUser | null> => {
-    if (!userData.refreshToken) {
-      console.log('No refresh token available');
-      return null;
-    }
-
-    try {
-      const response = await fetch('https://oauth2.googleapis.com/token', {
-        method: 'POST',
+      const response = await fetch('https://www.googleapis.com/oauth2/v2/userinfo', {
         headers: {
-          'Content-Type': 'application/x-www-form-urlencoded',
+          Authorization: `Bearer ${accessToken}`,
         },
-        body: new URLSearchParams({
-          client_id: ENV.GOOGLE_WEB_CLIENT_ID,
-          refresh_token: userData.refreshToken,
-          grant_type: 'refresh_token',
-        }),
       });
 
       if (response.ok) {
-        const tokenData = await response.json();
-        
-        const updatedUser: AuthUser = {
-          ...userData,
-          accessToken: tokenData.access_token,
-          expiresAt: Date.now() + (tokenData.expires_in * 1000),
-          // Keep existing refresh token if new one not provided
-          refreshToken: tokenData.refresh_token || userData.refreshToken,
-        };
+        const userInfo = await response.json();
+        console.log('User info fetched successfully:', userInfo.name);
 
-        await storeUserSecurely(updatedUser);
-        return updatedUser;
-      } else {
-        const errorData = await response.json();
-        console.error('Token refresh failed:', errorData);
-        return null;
-      }
-    } catch (error) {
-      console.error('Token refresh error:', error);
-      return null;
-    }
-  };
-
-  const fetchUserInfo = async (accessToken: string, refreshToken?: string) => {
-    try {
-      const userInfoResponse = await fetch('https://www.googleapis.com/userinfo/v2/me', {
-        headers: { Authorization: `Bearer ${accessToken}` },
-      });
-
-      if (userInfoResponse.ok) {
-        const userInfo = await userInfoResponse.json();
-        
         const authUser: AuthUser = {
           id: userInfo.id,
-          name: userInfo.name || userInfo.given_name || 'User',
+          name: userInfo.name,
           email: userInfo.email,
-          photo: userInfo.picture,
+          picture: userInfo.picture,
           accessToken: accessToken,
           refreshToken: refreshToken,
-          expiresAt: Date.now() + (3600 * 1000), // Default 1 hour
-        };
-
-        await storeUserSecurely(authUser);
+        };        
+        
         setUser(authUser);
-        setError(null);
+        
+        // Store tokens
+        await AsyncStorage.setItem('accessToken', accessToken);
+        if (refreshToken) {
+          await AsyncStorage.setItem('refreshToken', refreshToken);
+        }
+        await AsyncStorage.setItem('user', JSON.stringify(authUser));
+        
+        console.log('Authentication completed successfully');
       } else {
-        throw new Error(`Failed to fetch user info: ${userInfoResponse.status}`);
+        const errorText = await response.text();
+        console.error('Failed to fetch user info:', response.status, errorText);
+        throw new Error(`Failed to fetch user info: ${response.status}`);
       }
-    } catch (error) {
+    } catch (error: any) {
       console.error('Error fetching user info:', error);
       setError({
         code: 'USER_INFO_ERROR',
-        message: 'Failed to retrieve user information',
-        details: error
+        message: 'Failed to fetch user information.',
+        details: error,
       });
-      throw error;
     } finally {
       setIsSigningIn(false);
     }
-  };
-
-  const storeUserSecurely = async (userData: AuthUser) => {
-    try {
-      // Store non-sensitive data in AsyncStorage
-      const publicData = {
-        id: userData.id,
-        name: userData.name,
-        email: userData.email,
-        photo: userData.photo,
-      };
-      
-      // Store sensitive tokens in SecureStore
-      const secureData = {
-        accessToken: userData.accessToken,
-        refreshToken: userData.refreshToken,
-        expiresAt: userData.expiresAt,
-      };
-
-      await Promise.all([
-        AsyncStorage.setItem(STORAGE_KEY, JSON.stringify(publicData)),
-        SecureStore.setItemAsync(SECURE_STORAGE_KEY, JSON.stringify(secureData))
-      ]);
-    } catch (error) {
-      console.error('Error storing user data:', error);
-      // Fallback to AsyncStorage if SecureStore fails
-      await AsyncStorage.setItem(STORAGE_KEY, JSON.stringify(userData));
-    }
-  };
-
-  const clearStoredAuth = async () => {
-    try {
-      await Promise.all([
-        AsyncStorage.removeItem(STORAGE_KEY),
-        SecureStore.deleteItemAsync(SECURE_STORAGE_KEY).catch(() => {
-          // Ignore error if item doesn't exist
-        })
-      ]);
-    } catch (error) {
-      console.error('Error clearing stored auth:', error);
-    }
-  };
+  }, []);
 
   const signIn = useCallback(async (): Promise<boolean> => {
     try {
       setIsSigningIn(true);
       setError(null);
       
-      if (!request) {
-        setError({
-          code: 'REQUEST_ERROR',
-          message: 'Authentication not properly configured. Please try again.'
-        });
-        setIsSigningIn(false);
-        return false;
-      }
-      
       console.log('Starting Google Sign-In...');
-      const result = await promptAsync();
+      console.log('Request object: present');
+      console.log('PromptAsync function: present');
       
-      // The response will be handled by the useEffect hook
+      const result = await promptAsync();
+      console.log('PromptAsync result:', result ? JSON.stringify(result, null, 2) : 'null');
+      
       return result?.type === 'success';
-    } catch (error) {
+    } catch (error: any) {
       console.error('Sign-in error:', error);
+      console.error('Error details:', error.message);
       setError({
         code: 'SIGNIN_ERROR',
-        message: 'Failed to initiate sign-in. Please check your internet connection.',
+        message: 'Failed to complete sign-in. Please try again.',
         details: error
       });
+      return false;
+    } finally {
       setIsSigningIn(false);
+    }
+  }, [promptAsync]);
+
+  const handleManualToken = useCallback(async (accessToken: string): Promise<boolean> => {
+    try {
+      setIsSigningIn(true);
+      setError(null);
+      
+      console.log('Processing manual token...');
+      await fetchUserInfo(accessToken);
+      return true;
+    } catch (error: any) {
+      console.error('Manual token error:', error);
+      setError({
+        code: 'MANUAL_TOKEN_ERROR',
+        message: 'Invalid token. Please try again.',
+        details: error
+      });
       return false;
     }
-  }, [request, promptAsync]);
+  }, [fetchUserInfo]);
 
-  const signOut = useCallback(async () => {
+  const signOut = useCallback(async (): Promise<void> => {
     try {
       setUser(null);
-      setError(null);
-      await clearStoredAuth();
-      
-      // Optionally revoke token on Google's end
-      if (user?.accessToken) {
-        try {
-          await fetch(`https://oauth2.googleapis.com/revoke?token=${user.accessToken}`, {
-            method: 'POST'
-          });
-        } catch (revokeError) {
-          console.warn('Failed to revoke token on server:', revokeError);
-          // Don't throw - local signout is more important
-        }
-      }
+      await AsyncStorage.multiRemove(['accessToken', 'refreshToken', 'user']);
+      console.log('User signed out successfully');
     } catch (error) {
-      console.error('Sign-out error:', error);
-      setError({
-        code: 'SIGNOUT_ERROR',
-        message: 'Failed to complete sign-out',
-        details: error
-      });
+      console.error('Error during sign out:', error);
     }
-  }, [user]);
-
-  const refreshCurrentUserToken = useCallback(async (): Promise<boolean> => {
-    if (!user) {
-      setError({
-        code: 'NO_USER',
-        message: 'No user is currently signed in'
-      });
-      return false;
-    }
-
-    try {
-      const refreshedUser = await refreshUserToken(user);
-      if (refreshedUser) {
-        setUser(refreshedUser);
-        setError(null);
-        return true;
-      } else {
-        setError({
-          code: 'REFRESH_FAILED',
-          message: 'Failed to refresh authentication. Please sign in again.'
-        });
-        return false;
-      }
-    } catch (error) {
-      console.error('Manual token refresh error:', error);
-      setError({
-        code: 'REFRESH_ERROR',
-        message: 'Error occurred while refreshing authentication',
-        details: error
-      });
-      return false;
-    }
-  }, [user]);
-
-  // Auto-refresh token when it's about to expire
-  useEffect(() => {
-    if (!user?.expiresAt || !user?.refreshToken) return;
-
-    const timeUntilExpiry = user.expiresAt - Date.now();
-    const refreshTime = Math.max(timeUntilExpiry - (5 * 60 * 1000), 1000); // Refresh 5 minutes before expiry
-
-    if (refreshTime > 0) {
-      const timer = setTimeout(async () => {
-        console.log('Auto-refreshing token...');
-        const success = await refreshCurrentUserToken();
-        if (!success) {
-          console.warn('Auto-refresh failed, user may need to sign in again');
-        }
-      }, refreshTime);
-
-      return () => clearTimeout(timer);
-    }
-  }, [user?.expiresAt, refreshCurrentUserToken]);
-
-  // YouTube API helper function
-  const makeYouTubeAPICall = useCallback(async (
-    endpoint: string, 
-    options: RequestInit = {}
-  ): Promise<Response> => {
-    if (!user?.accessToken) {
-      throw new Error('User not authenticated');
-    }
-
-    // Ensure endpoint starts with /
-    const cleanEndpoint = endpoint.startsWith('/') ? endpoint : `/${endpoint}`;
-
-    const response = await fetch(`https://www.googleapis.com/youtube/v3${cleanEndpoint}`, {
-      ...options,
-      headers: {
-        'Authorization': `Bearer ${user.accessToken}`,
-        'Content-Type': 'application/json',
-        ...options.headers,
-      },
-    });
-
-    // Handle token expiry
-    if (response.status === 401) {
-      console.log('Token expired, attempting refresh...');
-      const refreshSuccess = await refreshCurrentUserToken();
-      if (refreshSuccess && user?.accessToken) {
-        // Retry with new token
-        return fetch(`https://www.googleapis.com/youtube/v3${cleanEndpoint}`, {
-          ...options,
-          headers: {
-            'Authorization': `Bearer ${user.accessToken}`,
-            'Content-Type': 'application/json',
-            ...options.headers,
-          },
-        });
-      }
-      throw new Error('Authentication expired. Please sign in again.');
-    }
-
-    return response;
-  }, [user, refreshCurrentUserToken]);
-
-  const clearError = useCallback(() => {
-    setError(null);
   }, []);
 
-  return {
-    // State
+  // Load stored user on app start
+  useEffect(() => {
+    const loadStoredUser = async () => {
+      try {
+        const storedUser = await AsyncStorage.getItem('user');
+        const accessToken = await AsyncStorage.getItem('accessToken');
+        
+        if (storedUser && accessToken) {
+          const parsedUser = JSON.parse(storedUser);
+          setUser({
+            ...parsedUser,
+            accessToken: accessToken,
+          });
+          console.log('Restored user session');
+        }
+      } catch (error) {
+        console.error('Error loading stored user:', error);
+      }
+    };
+    loadStoredUser();
+  }, []);
+
+  const value: AuthContextType = {
     user,
-    loading,
+    isAuthenticated: !!user,
     isSigningIn,
     error,
-    
-    // Actions
     signIn,
     signOut,
-    refreshUserToken: refreshCurrentUserToken,
-    clearError,
-    
-    // Utilities
-    makeYouTubeAPICall,
-    isTokenValid: user?.accessToken ? () => isTokenValid(user.accessToken) : null,
-    
-    // Token info
-    tokenExpiresAt: user?.expiresAt,
-    hasRefreshToken: !!user?.refreshToken,
+    handleManualToken,
   };
+
+  return (
+    <AuthContext.Provider value={value}>
+      {children}
+    </AuthContext.Provider>
+  );
 };

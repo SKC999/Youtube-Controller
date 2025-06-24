@@ -1,235 +1,197 @@
-import React from 'react';
+import React, { useState } from 'react';
 import {
   View,
   Text,
   StyleSheet,
-  Switch,
-  ScrollView,
   SafeAreaView,
+  ScrollView,
   TouchableOpacity,
   Alert,
+  Switch,
 } from 'react-native';
+import { useNavigation } from '@react-navigation/native';
 import { StackNavigationProp } from '@react-navigation/stack';
-import { useSettings } from '../hooks/useSettings';
-
-// Define the navigation types locally to avoid import issues
-type RootStackParamList = {
-  Home: undefined;
-  YouTube: undefined;
-  Settings: undefined;
-};
+import { RootStackParamList } from '../../App';
+import { useAuth } from '../hooks/useAuth';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 
 type SettingsScreenNavigationProp = StackNavigationProp<RootStackParamList, 'Settings'>;
 
-interface Props {
-  navigation: SettingsScreenNavigationProp;
-}
+const SettingsScreen = () => {
+  const navigation = useNavigation<SettingsScreenNavigationProp>();
+  const { user, signOut } = useAuth();
+  const [notificationsEnabled, setNotificationsEnabled] = useState(true);
+  const [autoplayEnabled, setAutoplayEnabled] = useState(false);
 
-const SettingsScreen: React.FC<Props> = ({ navigation }) => {
-  const { settings, updateSettings, getAllPresets, applyPreset } = useSettings();
-
-  const handleToggle = (key: keyof typeof settings) => {
-    if (typeof settings[key] === 'boolean') {
-      updateSettings({ [key]: !settings[key] });
-    }
-  };
-
-  const handleResetSettings = () => {
+  const handleSignOut = async () => {
     Alert.alert(
-      'Reset Settings',
-      'Are you sure you want to reset all settings to default?',
+      'Sign Out',
+      'Are you sure you want to sign out?',
       [
         { text: 'Cancel', style: 'cancel' },
         {
-          text: 'Reset',
+          text: 'Sign Out',
           style: 'destructive',
-          onPress: () => {
-            updateSettings({
-              showRecommendations: false,
-              showSidebar: false,
-              showComments: false,
-              showRelatedVideos: false,
-              showShorts: true, // Reset to default (enabled)
+          onPress: async () => {
+            await signOut();
+            navigation.reset({
+              index: 0,
+              routes: [{ name: 'Auth' }],
             });
-            Alert.alert('Success', 'Settings have been reset to default.');
           },
         },
       ]
     );
   };
 
-  const handlePresetSelect = (presetId: string) => {
-    const presets = getAllPresets();
-    const preset = presets.find(p => p.id === presetId);
-    
-    if (preset) {
-      Alert.alert(
-        `Apply ${preset.name}?`,
-        preset.description,
-        [
-          { text: 'Cancel', style: 'cancel' },
-          {
-            text: 'Apply',
-            onPress: async () => {
-              const success = await applyPreset(presetId);
-              if (success) {
-                Alert.alert('Success', `${preset.name} has been applied!`);
-              } else {
-                Alert.alert('Error', 'Failed to apply preset');
-              }
-            },
+  const clearCache = async () => {
+    Alert.alert(
+      'Clear Cache',
+      'This will clear all cached data. Are you sure?',
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Clear',
+          style: 'destructive',
+          onPress: async () => {
+            try {
+              // Clear only cache-related data, not auth tokens
+              await AsyncStorage.multiRemove(['cache_subscriptions', 'cache_videos']);
+              Alert.alert('Success', 'Cache cleared successfully');
+            } catch (error) {
+              console.error('Error clearing cache:', error);
+              Alert.alert('Error', 'Failed to clear cache');
+            }
           },
-        ]
-      );
-    }
+        },
+      ]
+    );
   };
 
-  const settingsOptions = [
-    {
-      key: 'showRecommendations' as const,
-      title: 'Show Recommendations',
-      description: 'Display recommended videos on homepage and sidebar',
-      icon: '📺',
-    },
-    {
-      key: 'showSidebar' as const,
-      title: 'Show Sidebar',
-      description: 'Display the left navigation sidebar (desktop)',
-      icon: '📋',
-    },
-    {
-      key: 'showComments' as const,
-      title: 'Show Comments',
-      description: 'Display comments section under videos',
-      icon: '💬',
-    },
-    {
-      key: 'showRelatedVideos' as const,
-      title: 'Show Related Videos',
-      description: 'Display related videos and end screen suggestions',
-      icon: '🔗',
-    },
-    {
-      key: 'showShorts' as const,
-      title: 'Show Shorts',
-      description: 'Allow YouTube Shorts (short vertical videos)',
-      icon: '📱',
-      warning: !settings.showShorts ? 'Shorts will be redirected to regular video format' : undefined,
-    },
-  ];
+  const showAccountInfo = () => {
+    Alert.alert(
+      'Account Information',
+      `Name: ${user?.name}\nEmail: ${user?.email}\nUser ID: ${user?.id}`,
+      [{ text: 'OK' }]
+    );
+  };
 
-  // Filter out family-safe preset from available presets
-  const presets = getAllPresets().filter(preset => preset.id !== 'family-safe');
+  const showAbout = () => {
+    Alert.alert(
+      'About YouTube Controller',
+      'Version 1.0.0\n\nA simple YouTube controller app built with React Native and Expo.\n\nDeveloped for managing YouTube subscriptions and controlling playback.',
+      [{ text: 'OK' }]
+    );
+  };
+
+  const SettingItem = ({ 
+    title, 
+    subtitle, 
+    onPress, 
+    showArrow = true,
+    rightComponent 
+  }: {
+    title: string;
+    subtitle?: string;
+    onPress?: () => void;
+    showArrow?: boolean;
+    rightComponent?: React.ReactNode;
+  }) => (
+    <TouchableOpacity style={styles.settingItem} onPress={onPress} disabled={!onPress}>
+      <View style={styles.settingLeft}>
+        <Text style={styles.settingTitle}>{title}</Text>
+        {subtitle && <Text style={styles.settingSubtitle}>{subtitle}</Text>}
+      </View>
+      <View style={styles.settingRight}>
+        {rightComponent}
+        {showArrow && onPress && <Text style={styles.arrow}>›</Text>}
+      </View>
+    </TouchableOpacity>
+  );
 
   return (
     <SafeAreaView style={styles.container}>
-      <ScrollView contentContainerStyle={styles.scrollContent}>
-        {/* Quick Presets Section */}
+      <ScrollView style={styles.scrollView}>
+        {/* Account Section */}
         <View style={styles.section}>
-          <Text style={styles.sectionTitle}>Quick Presets</Text>
-          <Text style={styles.sectionDescription}>
-            Apply predefined configurations instantly
-          </Text>
-          <View style={styles.presetsGrid}>
-            {presets.slice(0, 6).map((preset) => (
-              <TouchableOpacity
-                key={preset.id}
-                style={styles.presetCard}
-                onPress={() => handlePresetSelect(preset.id)}
-              >
-                <Text style={styles.presetIcon}>{preset.icon}</Text>
-                <Text style={styles.presetName}>{preset.name}</Text>
-              </TouchableOpacity>
-            ))}
-          </View>
-        </View>
-
-        {/* Visibility Controls Section */}
-        <View style={styles.section}>
-          <Text style={styles.sectionTitle}>Content Controls</Text>
-          <Text style={styles.sectionDescription}>
-            Choose what content to show or hide on YouTube
-          </Text>
-          {settingsOptions.map((option) => (
-            <View key={option.key} style={styles.settingRow}>
-              <View style={styles.settingIcon}>
-                <Text style={styles.settingIconText}>{option.icon}</Text>
-              </View>
-              <View style={styles.settingInfo}>
-                <Text style={styles.settingTitle}>{option.title}</Text>
-                <Text style={styles.settingDescription}>{option.description}</Text>
-                {option.warning && (
-                  <Text style={styles.settingWarning}>{option.warning}</Text>
-                )}
-              </View>
-              <Switch
-                value={settings[option.key]}
-                onValueChange={() => handleToggle(option.key)}
-                trackColor={{ false: '#e0e0e0', true: '#FF0000' }}
-                thumbColor={settings[option.key] ? '#fff' : '#f0f0f0'}
-              />
-            </View>
-          ))}
-        </View>
-
-        {/* Quick Actions Section */}
-        <View style={styles.section}>
-          <Text style={styles.sectionTitle}>Quick Actions</Text>
+          <Text style={styles.sectionTitle}>Account</Text>
           
-          <TouchableOpacity
-            style={[styles.actionButton, styles.primaryButton]}
-            onPress={() => navigation.navigate('YouTube')}
-          >
-            <Text style={styles.primaryButtonText}>Apply & Open YouTube</Text>
-          </TouchableOpacity>
-
-          <TouchableOpacity
-            style={[styles.actionButton, styles.secondaryButton]}
-            onPress={handleResetSettings}
-          >
-            <Text style={styles.secondaryButtonText}>Reset to Default</Text>
-          </TouchableOpacity>
+          <SettingItem
+            title="Account Information"
+            subtitle={user?.email}
+            onPress={showAccountInfo}
+          />
+          
+          <SettingItem
+            title="Sign Out"
+            subtitle="Sign out of your Google account"
+            onPress={handleSignOut}
+          />
         </View>
 
-        {/* Button Position Info Section */}
+        {/* App Settings Section */}
         <View style={styles.section}>
-          <Text style={styles.sectionTitle}>💡 Controls Info</Text>
-          <View style={styles.infoCard}>
-            <Text style={styles.infoText}>
-              <Text style={styles.infoBold}>Draggable Settings Button:</Text> In YouTube, you can move the settings button (⚙️) by pressing and dragging it to any position on the screen for easy access.
-            </Text>
-          </View>
-          <View style={styles.infoCard}>
-            <Text style={styles.infoText}>
-              <Text style={styles.infoBold}>Automatic Application:</Text> Settings are applied automatically. Simply navigate to YouTube to see your changes take effect.
-            </Text>
-          </View>
+          <Text style={styles.sectionTitle}>App Settings</Text>
+          
+          <SettingItem
+            title="Notifications"
+            subtitle="Enable push notifications"
+            showArrow={false}
+            rightComponent={
+              <Switch
+                value={notificationsEnabled}
+                onValueChange={setNotificationsEnabled}
+                trackColor={{ false: '#767577', true: '#FF0000' }}
+                thumbColor={notificationsEnabled ? '#ffffff' : '#f4f3f4'}
+              />
+            }
+          />
+          
+          <SettingItem
+            title="Autoplay"
+            subtitle="Automatically play next video"
+            showArrow={false}
+            rightComponent={
+              <Switch
+                value={autoplayEnabled}
+                onValueChange={setAutoplayEnabled}
+                trackColor={{ false: '#767577', true: '#FF0000' }}
+                thumbColor={autoplayEnabled ? '#ffffff' : '#f4f3f4'}
+              />
+            }
+          />
         </View>
 
-        {/* Current Configuration Section */}
+        {/* Data & Storage Section */}
         <View style={styles.section}>
-          <Text style={styles.sectionTitle}>Current Configuration</Text>
-          <View style={styles.configPreview}>
-            <Text style={styles.configText}>
-              Mode: {settings.showRecommendations ? 'Full YouTube' : 'Restricted Mode'}
-            </Text>
-            <Text style={styles.configText}>
-              Hidden Elements: {
-                [
-                  !settings.showRecommendations && 'Recommendations',
-                  !settings.showSidebar && 'Sidebar',
-                  !settings.showComments && 'Comments',
-                  !settings.showRelatedVideos && 'Related Videos',
-                  !settings.showShorts && 'Shorts',
-                ].filter(Boolean).join(', ') || 'None'
-              }
-            </Text>
-            {!settings.showShorts && (
-              <Text style={styles.configWarning}>
-                ⚠️ Shorts URLs will be redirected to regular video format
-              </Text>
-            )}
-          </View>
+          <Text style={styles.sectionTitle}>Data & Storage</Text>
+          
+          <SettingItem
+            title="Clear Cache"
+            subtitle="Clear cached videos and subscriptions"
+            onPress={clearCache}
+          />
+        </View>
+
+        {/* Support Section */}
+        <View style={styles.section}>
+          <Text style={styles.sectionTitle}>Support</Text>
+          
+          <SettingItem
+            title="About"
+            subtitle="App version and information"
+            onPress={showAbout}
+          />
+        </View>
+
+        {/* User Info Footer */}
+        <View style={styles.footer}>
+          <Text style={styles.footerText}>
+            Signed in as {user?.name}
+          </Text>
+          <Text style={styles.footerSubtext}>
+            User ID: {user?.id}
+          </Text>
         </View>
       </ScrollView>
     </SafeAreaView>
@@ -241,163 +203,66 @@ const styles = StyleSheet.create({
     flex: 1,
     backgroundColor: '#f5f5f5',
   },
-  scrollContent: {
-    padding: 20,
+  scrollView: {
+    flex: 1,
   },
   section: {
-    marginBottom: 30,
+    marginTop: 20,
   },
   sectionTitle: {
-    fontSize: 20,
-    fontWeight: '600',
-    color: '#333',
-    marginBottom: 8,
-  },
-  sectionDescription: {
-    fontSize: 14,
-    color: '#666',
-    marginBottom: 15,
-  },
-  presetsGrid: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    gap: 12,
-  },
-  presetCard: {
-    backgroundColor: 'white',
-    borderRadius: 12,
-    padding: 16,
-    alignItems: 'center',
-    minWidth: 100,
-    elevation: 2,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.1,
-    shadowRadius: 4,
-  },
-  presetIcon: {
-    fontSize: 24,
-    marginBottom: 8,
-  },
-  presetName: {
-    fontSize: 12,
-    fontWeight: '600',
-    color: '#333',
-    textAlign: 'center',
-  },
-  settingRow: {
-    backgroundColor: 'white',
-    padding: 16,
-    borderRadius: 12,
-    marginBottom: 12,
-    flexDirection: 'row',
-    alignItems: 'center',
-    elevation: 2,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.1,
-    shadowRadius: 4,
-  },
-  settingIcon: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
-    backgroundColor: '#f0f0f0',
-    justifyContent: 'center',
-    alignItems: 'center',
-    marginRight: 16,
-  },
-  settingIconText: {
     fontSize: 18,
+    fontWeight: '600',
+    color: '#333',
+    marginBottom: 10,
+    marginHorizontal: 20,
   },
-  settingInfo: {
+  settingItem: {
+    backgroundColor: 'white',
+    paddingVertical: 15,
+    paddingHorizontal: 20,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    borderBottomWidth: 0.5,
+    borderBottomColor: '#e0e0e0',
+  },
+  settingLeft: {
     flex: 1,
-    marginRight: 16,
   },
   settingTitle: {
     fontSize: 16,
-    fontWeight: '600',
+    fontWeight: '500',
     color: '#333',
-    marginBottom: 4,
   },
-  settingDescription: {
+  settingSubtitle: {
     fontSize: 14,
     color: '#666',
+    marginTop: 2,
   },
-  settingWarning: {
-    fontSize: 12,
-    color: '#FF6B6B',
-    fontStyle: 'italic',
-    marginTop: 4,
-  },
-  actionButton: {
-    padding: 16,
-    borderRadius: 12,
+  settingRight: {
+    flexDirection: 'row',
     alignItems: 'center',
-    marginBottom: 12,
   },
-  primaryButton: {
-    backgroundColor: '#FF0000',
+  arrow: {
+    fontSize: 20,
+    color: '#c0c0c0',
+    marginLeft: 10,
   },
-  secondaryButton: {
-    backgroundColor: 'white',
-    borderWidth: 2,
-    borderColor: '#FF6B6B',
+  footer: {
+    padding: 20,
+    alignItems: 'center',
+    marginTop: 20,
+    marginBottom: 40,
   },
-  primaryButtonText: {
-    color: 'white',
+  footerText: {
     fontSize: 16,
-    fontWeight: '600',
-  },
-  secondaryButtonText: {
-    color: '#FF6B6B',
-    fontSize: 16,
-    fontWeight: '600',
-  },
-  infoCard: {
-    backgroundColor: 'white',
-    padding: 14,
-    borderRadius: 10,
-    marginBottom: 10,
-    borderLeftWidth: 4,
-    borderLeftColor: '#4285F4',
-    elevation: 1,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 1 },
-    shadowOpacity: 0.1,
-    shadowRadius: 2,
-  },
-  infoText: {
-    fontSize: 14,
-    color: '#555',
-    lineHeight: 20,
-  },
-  infoBold: {
-    fontWeight: '600',
-    color: '#333',
-  },
-  configPreview: {
-    backgroundColor: 'white',
-    padding: 16,
-    borderRadius: 12,
-    elevation: 2,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.1,
-    shadowRadius: 4,
-  },
-  configText: {
-    fontSize: 14,
-    color: '#333',
-    marginBottom: 8,
-    lineHeight: 20,
-  },
-  configWarning: {
-    fontSize: 14,
-    color: '#FF6B6B',
-    marginBottom: 8,
-    lineHeight: 20,
     fontWeight: '500',
+    color: '#333',
+  },
+  footerSubtext: {
+    fontSize: 12,
+    color: '#999',
+    marginTop: 5,
   },
 });
 

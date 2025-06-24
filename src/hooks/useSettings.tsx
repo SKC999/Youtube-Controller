@@ -278,7 +278,7 @@ export const useSettings = () => {
           const mergedSettings = { ...defaultSettings, ...parsedSettings };
           setSettings(mergedSettings);
         } else {
-          console.warn('Loaded settings failed validation:', validation.errors);
+          //console.warn('Loaded settings failed validation:', validation.errors);
           setError('Loaded settings are invalid, using defaults');
           setSettings(defaultSettings);
         }
@@ -330,7 +330,7 @@ export const useSettings = () => {
       
       // Show warnings if any
       if (validation.warnings.length > 0) {
-        console.warn('Settings warnings:', validation.warnings);
+        //console.warn('Settings warnings:', validation.warnings);
       }
       
       return true;

@@ -7,14 +7,28 @@ import { SafeAreaProvider } from 'react-native-safe-area-context';
 
 // Import screens
 import LoadingScreen from './src/screens/LoadingScreen';
-import { AuthScreen } from './src/screens/AuthScreen';
+import AuthScreen from './src/screens/AuthScreen'; // Remove the {} since it's default export
+import HomeScreen from './src/screens/HomeScreen';
+import SubscriptionsScreen from './src/screens/SubscriptionsScreen';
+import YouTubeScreen from './src/screens/YouTubeScreen';
+import SettingsScreen from './src/screens/SettingsScreen';
 
-// Import auth context
-import { AuthProvider } from './src/context/AuthContext';
+// Import auth context - use the new AuthProvider from useAuth
+import { AuthProvider } from './src/hooks/useAuth';
 
 export type RootStackParamList = {
   Loading: undefined;
   Auth: undefined;
+  Home: undefined;
+  Subscriptions: undefined;
+  YouTube: { 
+    channelId?: string; 
+    channelTitle?: string; 
+    videoId?: string; 
+    videoTitle?: string 
+  } | undefined;
+  Settings: undefined;
+  ChannelView: { channelId: string; channelTitle: string };
 };
 
 const Stack = createStackNavigator<RootStackParamList>();
@@ -28,7 +42,7 @@ export default function App() {
             initialRouteName="Loading"
             screenOptions={{
               headerStyle: {
-                backgroundColor: '#FF0000', // YouTube red
+                backgroundColor: '#FF0000',
               },
               headerTintColor: '#fff',
               headerTitleStyle: {
@@ -47,6 +61,35 @@ export default function App() {
               options={{ 
                 title: 'Sign In',
                 headerShown: false 
+              }}
+            />
+            <Stack.Screen 
+              name="Home" 
+              component={HomeScreen}
+              options={{ 
+                title: 'YouTube Controller'
+              }}
+            />
+            <Stack.Screen 
+              name="Subscriptions"
+              component={SubscriptionsScreen}
+              options={{ 
+                title: 'My Subscriptions'
+              }}
+            />
+            <Stack.Screen 
+              name="YouTube" 
+              component={YouTubeScreen}
+              options={{ 
+                title: 'YouTube',
+                headerShown: false
+              }}
+            />
+            <Stack.Screen 
+              name="Settings" 
+              component={SettingsScreen}
+              options={{ 
+                title: 'Settings'
               }}
             />
           </Stack.Navigator>

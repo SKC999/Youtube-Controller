@@ -14,23 +14,14 @@ import {
   Modal,
   ScrollView,
 } from 'react-native';
-import { StackNavigationProp } from '@react-navigation/stack';
-import { useAuthContext } from '../context/AuthContext';
+import { StackScreenProps } from '@react-navigation/stack';
+import { useAuth } from '../hooks/useAuth';
+import { RootStackParamList } from '../../App';
 
-type RootStackParamList = {
-  Loading: undefined;
-  Auth: undefined;
-  Home: undefined;
-  YouTube: { channelId?: string; channelTitle?: string; videoId?: string; videoTitle?: string } | undefined;
-  Settings: undefined;
-  Subscriptions: undefined;
-  ChannelView: { channelId: string; channelTitle: string };
-};
-
-type SubscriptionsScreenNavigationProp = StackNavigationProp<RootStackParamList, 'Subscriptions'>;
-
+// Use StackScreenProps instead of custom interface
 interface Props {
-  navigation: SubscriptionsScreenNavigationProp;
+  navigation: any;
+  route?: any;
 }
 
 interface Subscription {
@@ -74,7 +65,7 @@ interface ChannelInfo {
 }
 
 const SubscriptionsScreen: React.FC<Props> = ({ navigation }) => {
-  const { user } = useAuthContext();
+  const { user } = useAuth();
   const [subscriptions, setSubscriptions] = useState<Subscription[]>([]);
   const [filteredSubscriptions, setFilteredSubscriptions] = useState<Subscription[]>([]);
   const [loading, setLoading] = useState(true);
@@ -188,7 +179,7 @@ const SubscriptionsScreen: React.FC<Props> = ({ navigation }) => {
           const videosData = await makeAPICall(`/search?${videosParams}`);
           setChannelVideos(videosData.items || []);
         } catch (videosError) {
-          console.warn('Failed to load channel videos:', videosError);
+          //console.warn('Failed to load channel videos:', videosError);
           setChannelVideos([]);
         }
       }

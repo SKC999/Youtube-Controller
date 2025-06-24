@@ -4,159 +4,46 @@ import {
   Text,
   StyleSheet,
   TouchableOpacity,
-  ScrollView,
   SafeAreaView,
-  Image,
+  ScrollView,
+  Switch,
   Alert,
-  FlatList,
-  ActivityIndicator,
+  Dimensions,
+  StatusBar,
 } from 'react-native';
+import { useNavigation } from '@react-navigation/native';
 import { StackNavigationProp } from '@react-navigation/stack';
+import { RootStackParamList } from '../../App';
+import { useAuth } from '../hooks/useAuth';
 import { useSettings } from '../hooks/useSettings';
-import { useAuthContext } from '../context/AuthContext';
-
-// Define the navigation types to match App.tsx
-type RootStackParamList = {
-  Loading: undefined;
-  Auth: undefined;
-  Home: undefined;
-  YouTube: { channelId?: string; channelTitle?: string; videoId?: string; videoTitle?: string } | undefined;
-  Settings: undefined;
-  Subscriptions: undefined;
-  ChannelView: { channelId: string; channelTitle: string };
-};
 
 type HomeScreenNavigationProp = StackNavigationProp<RootStackParamList, 'Home'>;
 
-interface Props {
-  navigation: HomeScreenNavigationProp;
-}
+const { width } = Dimensions.get('window');
 
-interface Subscription {
-  id: string;
-  snippet: {
-    title: string;
-    thumbnails: {
-      default: { url: string };
-    };
-    resourceId: {
-      channelId: string;
-    };
-  };
-}
+const HomeScreen = () => {
+  const navigation = useNavigation<HomeScreenNavigationProp>();
+  const { user, signOut } = useAuth();
+  const { 
+    settings, 
+    updateSettings, 
+    getCurrentMode, 
+    builtInPresets, 
+    applyPreset,
+    loading 
+  } = useSettings();
+  
+  const [lastSaved, setLastSaved] = useState<Date | null>(null);
 
-const HomeScreen: React.FC<Props> = ({ navigation }) => {
-  const { settings, updateSettings } = useSettings();
-  const { user, signOut } = useAuthContext();
-  const [subscriptions, setSubscriptions] = useState<Subscription[]>([]);
-  const [loadingSubscriptions, setLoadingSubscriptions] = useState(false);
-
+  // Track when settings are updated
   useEffect(() => {
-    if (user?.accessToken) {
-      fetchSubscriptions();
-    }
-  }, [user]);
+    setLastSaved(new Date());
+  }, [settings]);
 
-  const fetchSubscriptions = async () => {
-    if (!user?.accessToken) return;
-
-    setLoadingSubscriptions(true);
-    try {
-      const response = await fetch(
-        'https://www.googleapis.com/youtube/v3/subscriptions?part=snippet&mine=true&maxResults=10',
-        {
-          headers: {
-            Authorization: `Bearer ${user.accessToken}`,
-          },
-        }
-      );
-
-      if (response.ok) {
-        const data = await response.json();
-        setSubscriptions(data.items || []);
-      }
-    } catch (error) {
-      console.error('Error fetching subscriptions:', error);
-    } finally {
-      setLoadingSubscriptions(false);
-    }
-  };
-
-  const quickModes = [
-    {
-      id: 'focus',
-      name: 'Focus Mode',
-      description: 'Hide all distractions - just search and watch',
-      icon: '🎯',
-      settings: {
-        showRecommendations: false,
-        showSidebar: false,
-        showComments: false,
-        showRelatedVideos: false,
-        showShorts: false, // Block Shorts in focus mode
-      },
-    },
-    {
-      id: 'minimal',
-      name: 'Minimal Mode',
-      description: 'Hide recommendations but keep basic features',
-      icon: '✨',
-      settings: {
-        showRecommendations: false,
-        showSidebar: true,
-        showComments: true,
-        showRelatedVideos: false,
-        showShorts: true, // Allow Shorts in minimal mode
-      },
-    },
-    {
-      id: 'no-shorts',
-      name: 'No Shorts',
-      description: 'Hide all Shorts while keeping other features',
-      icon: '🚫',
-      settings: {
-        showRecommendations: true,
-        showSidebar: true,
-        showComments: true,
-        showRelatedVideos: true,
-        showShorts: false, // Specifically block Shorts
-      },
-    },
-    {
-      id: 'normal',
-      name: 'Normal Mode',
-      description: 'Show all YouTube features including Shorts',
-      icon: '📺',
-      settings: {
-        showRecommendations: true,
-        showSidebar: true,
-        showComments: true,
-        showRelatedVideos: true,
-        showShorts: true,
-      },
-    },
-  ];
-
-  const handleQuickMode = async (mode: typeof quickModes[0]) => {
-    const success = await updateSettings(mode.settings);
-    if (success) {
-      Alert.alert(
-        `${mode.name} Applied!`,
-        mode.description,
-        [
-          { text: 'Open YouTube', onPress: () => navigation.navigate('YouTube') },
-          { text: 'Stay Here', style: 'cancel' },
-        ]
-      );
-    } else {
-      Alert.alert('Error', 'Failed to apply settings. Please try again.');
-    }
-  };
-
-  const handleSignOut = () => {
+  const handleSignOut = async () => {
     Alert.alert(
       'Sign Out',
-      'Are you sure you want to sign out? You\'ll lose access to your personal YouTube features.',
+      'Are you sure you want to sign out?',
       [
         { text: 'Cancel', style: 'cancel' },
         {
@@ -171,210 +58,240 @@ const HomeScreen: React.FC<Props> = ({ navigation }) => {
     );
   };
 
-  const navigateToSubscriptions = () => {
-    console.log('Navigating to Subscriptions...');
-    try {
-      navigation.navigate('Subscriptions');
-    } catch (error) {
-      console.error('Navigation error:', error);
-      Alert.alert('Error', 'Failed to navigate to subscriptions. Please try again.');
+  const handleSettingToggle = async (setting: keyof typeof settings, value: any) => {
+    const success = await updateSettings({ [setting]: value });
+    if (!success) {
+      Alert.alert('Error', 'Failed to update setting. Please try again.');
     }
   };
 
-  const getStatusIndicator = (setting: keyof typeof settings, label: string) => {
-    const isEnabled = settings[setting];
-    return (
-      <View style={[styles.statusIndicator, isEnabled ? styles.statusEnabled : styles.statusDisabled]}>
-        <Text style={[styles.statusText, isEnabled ? styles.statusTextEnabled : styles.statusTextDisabled]}>
-          {label}: {isEnabled ? 'ON' : 'OFF'}
-        </Text>
+  const handlePresetApply = async (presetId: string) => {
+    const preset = builtInPresets.find(p => p.id === presetId);
+    if (!preset) return;
+
+    Alert.alert(
+      'Apply Preset',
+      `Apply "${preset.name}"?\n\n${preset.description}`,
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Apply',
+          onPress: async () => {
+            const success = await applyPreset(presetId);
+            if (success) {
+              Alert.alert('Success', `"${preset.name}" has been applied!`);
+            } else {
+              Alert.alert('Error', 'Failed to apply preset. Please try again.');
+            }
+          },
+        },
+      ]
+    );
+  };
+
+  const openYouTubeWithSettings = () => {
+    navigation.navigate('YouTube');
+  };
+
+  const currentMode = getCurrentMode();
+  const isCustomMode = currentMode === 'Custom';
+
+  // Status indicators
+  const getStatusColor = (enabled: boolean) => enabled ? '#4CAF50' : '#f44336';
+  const getStatusText = (enabled: boolean) => enabled ? 'ON' : 'OFF';
+
+  const ControlCard = ({ 
+    title, 
+    subtitle, 
+    children, 
+    icon 
+  }: {
+    title: string;
+    subtitle?: string;
+    children: React.ReactNode;
+    icon?: string;
+  }) => (
+    <View style={styles.controlCard}>
+      <View style={styles.cardHeader}>
+        <View style={styles.cardTitleContainer}>
+          {icon && <Text style={styles.cardIcon}>{icon}</Text>}
+          <View>
+            <Text style={styles.cardTitle}>{title}</Text>
+            {subtitle && <Text style={styles.cardSubtitle}>{subtitle}</Text>}
+          </View>
+        </View>
       </View>
+      <View style={styles.cardContent}>
+        {children}
+      </View>
+    </View>
+  );
+
+  const ToggleRow = ({ 
+    label, 
+    value, 
+    onToggle, 
+    description,
+    disabled = false 
+  }: {
+    label: string;
+    value: boolean;
+    onToggle: (value: boolean) => void;
+    description?: string;
+    disabled?: boolean;
+  }) => (
+    <View style={[styles.toggleRow, disabled && styles.toggleRowDisabled]}>
+      <View style={styles.toggleInfo}>
+        <Text style={[styles.toggleLabel, disabled && styles.toggleLabelDisabled]}>
+          {label}
+        </Text>
+        {description && (
+          <Text style={[styles.toggleDescription, disabled && styles.toggleDescriptionDisabled]}>
+            {description}
+          </Text>
+        )}
+      </View>
+      <View style={styles.toggleContainer}>
+        <Text style={[
+          styles.statusText, 
+          { color: getStatusColor(value) },
+          disabled && styles.statusTextDisabled
+        ]}>
+          {getStatusText(value)}
+        </Text>
+        <Switch
+          value={value}
+          onValueChange={onToggle}
+          disabled={disabled || loading}
+          trackColor={{ false: '#767577', true: '#FF0000' }}
+          thumbColor={value ? '#ffffff' : '#f4f3f4'}
+          style={styles.switch}
+        />
+      </View>
+    </View>
+  );
+
+  const PresetButton = ({ preset }: { preset: any }) => {
+    const isActive = currentMode === preset.name;
+    
+    return (
+      <TouchableOpacity
+        style={[styles.presetButton, isActive && styles.presetButtonActive]}
+        onPress={() => handlePresetApply(preset.id)}
+        disabled={loading}
+      >
+        <Text style={styles.presetIcon}>{preset.icon}</Text>
+        <Text style={[styles.presetName, isActive && styles.presetNameActive]}>
+          {preset.name}
+        </Text>
+        <Text style={[styles.presetDescription, isActive && styles.presetDescriptionActive]}>
+          {preset.description}
+        </Text>
+        {isActive && (
+          <View style={styles.activeIndicator}>
+            <Text style={styles.activeIndicatorText}>ACTIVE</Text>
+          </View>
+        )}
+      </TouchableOpacity>
     );
   };
 
   return (
     <SafeAreaView style={styles.container}>
-      <ScrollView contentContainerStyle={styles.scrollContent}>
-        {/* User Profile Section */}
-        {user && (
-          <View style={styles.userSection}>
-            <View style={styles.userInfo}>
-              {user.photo ? (
-                <Image source={{ uri: user.photo }} style={styles.userAvatar} />
-              ) : (
-                <View style={styles.userAvatarPlaceholder}>
-                  <Text style={styles.userAvatarText}>
-                    {user.name.charAt(0).toUpperCase()}
-                  </Text>
-                </View>
-              )}
-              <View style={styles.userDetails}>
-                <Text style={styles.userName}>Welcome, {user.name}</Text>
-                <Text style={styles.userEmail}>{user.email}</Text>
-              </View>
-            </View>
-            <TouchableOpacity
-              style={styles.signOutButton}
-              onPress={handleSignOut}
-            >
-              <Text style={styles.signOutButtonText}>Sign Out</Text>
-            </TouchableOpacity>
-          </View>
-        )}
-
-        <View style={styles.header}>
-          <Text style={styles.title}>YouTube Controller</Text>
-          <Text style={styles.subtitle}>
-            Take control of your YouTube experience
+      <StatusBar barStyle="light-content" backgroundColor="#FF0000" />
+      
+      {/* Header */}
+      <View style={styles.header}>
+        <View>
+          <Text style={styles.headerTitle}>YouTube Controller</Text>
+          <Text style={styles.headerSubtitle}>
+            Welcome back, {user?.name?.split(' ')[0] || 'User'}
           </Text>
         </View>
-
-        {/* Quick Start Section */}
-        <View style={styles.section}>
-          <Text style={styles.sectionTitle}>Quick Start Modes</Text>
-          <Text style={styles.sectionDescription}>
-            Apply preset configurations instantly
+        <TouchableOpacity style={styles.profileButton} onPress={handleSignOut}>
+          <Text style={styles.profileButtonText}>
+            {user?.name?.charAt(0) || 'U'}
           </Text>
-          {quickModes.map((mode) => (
-            <TouchableOpacity
-              key={mode.id}
-              style={styles.modeCard}
-              onPress={() => handleQuickMode(mode)}
-            >
-              <View style={styles.modeHeader}>
-                <Text style={styles.modeIcon}>{mode.icon}</Text>
-                <View style={styles.modeInfo}>
-                  <Text style={styles.modeName}>{mode.name}</Text>
-                  <Text style={styles.modeDescription}>{mode.description}</Text>
-                </View>
-              </View>
-              <View style={styles.modeSettings}>
-                <Text style={styles.modeSettingsText}>
-                  {!mode.settings.showShorts ? '🚫 Shorts' : '📱 Shorts'} • 
-                  {!mode.settings.showRecommendations ? ' 🚫 Recs' : ' 📺 Recs'} • 
-                  {!mode.settings.showComments ? ' 🚫 Comments' : ' 💬 Comments'}
+        </TouchableOpacity>
+      </View>
+
+      <ScrollView style={styles.scrollView} showsVerticalScrollIndicator={false}>
+        {/* Current Mode Status */}
+        <ControlCard 
+          title="Current Mode" 
+          subtitle={`Active since ${lastSaved?.toLocaleTimeString() || 'startup'}`}
+          icon="⚙️"
+        >
+          <View style={styles.currentModeContainer}>
+            <View style={styles.currentModeInfo}>
+              <Text style={styles.currentModeName}>{currentMode}</Text>
+              {isCustomMode && (
+                <Text style={styles.customModeNote}>
+                  Custom configuration active
                 </Text>
-              </View>
-            </TouchableOpacity>
-          ))}
-        </View>
-
-        {/* Current Settings Status */}
-        <View style={styles.section}>
-          <Text style={styles.sectionTitle}>Current Settings</Text>
-          <View style={styles.settingsStatus}>
-            {getStatusIndicator('showRecommendations', 'Recommendations')}
-            {getStatusIndicator('showShorts', 'Shorts')}
-            {getStatusIndicator('showComments', 'Comments')}
-            {getStatusIndicator('showRelatedVideos', 'Related Videos')}
-          </View>
-        </View>
-
-        {/* Subscriptions Section */}
-        {user && (
-          <View style={styles.section}>
-            <View style={styles.sectionHeader}>
-              <Text style={styles.sectionTitle}>Your Subscriptions</Text>
-              <TouchableOpacity
-                onPress={navigateToSubscriptions}
-                style={styles.seeAllButton}
-              >
-                <Text style={styles.seeAllText}>See All</Text>
-              </TouchableOpacity>
+              )}
             </View>
-            {loadingSubscriptions ? (
-              <ActivityIndicator size="small" color="#FF0000" style={styles.loader} />
-            ) : subscriptions.length > 0 ? (
-              <FlatList
-                horizontal
-                data={subscriptions}
-                keyExtractor={(item) => item.id}
-                renderItem={({ item }) => (
-                  <TouchableOpacity style={styles.subscriptionItem}>
-                    <Image
-                      source={{ uri: item.snippet.thumbnails.default.url }}
-                      style={styles.subscriptionThumbnail}
-                    />
-                    <Text style={styles.subscriptionTitle} numberOfLines={1}>
-                      {item.snippet.title}
-                    </Text>
-                  </TouchableOpacity>
-                )}
-                showsHorizontalScrollIndicator={false}
-                contentContainerStyle={styles.subscriptionsList}
-              />
-            ) : (
-              <TouchableOpacity
-                style={styles.subscriptionButton}
-                onPress={navigateToSubscriptions}
-              >
-                <Text style={styles.subscriptionButtonText}>View Subscriptions</Text>
-              </TouchableOpacity>
-            )}
-          </View>
-        )}
-
-        {/* Action Buttons */}
-        <View style={styles.buttonContainer}>
-          <TouchableOpacity
-            style={[styles.button, styles.primaryButton]}
-            onPress={() => navigation.navigate('YouTube')}
-          >
-            <Text style={styles.primaryButtonText}>
-              {user ? 'Open YouTube (Signed In)' : 'Open YouTube'}
-            </Text>
-          </TouchableOpacity>
-
-          <TouchableOpacity
-            style={[styles.button, styles.secondaryButton]}
-            onPress={() => navigation.navigate('Settings')}
-          >
-            <Text style={styles.secondaryButtonText}>Advanced Settings</Text>
-          </TouchableOpacity>
-
-          {user && (
-            <TouchableOpacity
-              style={[styles.button, styles.subscriptionsButton]}
-              onPress={navigateToSubscriptions}
+            <TouchableOpacity 
+              style={styles.launchButton}
+              onPress={openYouTubeWithSettings}
             >
-              <Text style={styles.subscriptionsButtonText}>📺 All Subscriptions</Text>
+              <Text style={styles.launchButtonText}>🚀 Launch YouTube</Text>
             </TouchableOpacity>
-          )}
+          </View>
+        </ControlCard>
 
-          {!user && (
-            <TouchableOpacity
-              style={[styles.button, styles.authButton]}
-              onPress={() => navigation.navigate('Auth')}
-            >
-              <Text style={styles.authButtonText}>Sign In to Access Account</Text>
-            </TouchableOpacity>
-          )}
-        </View>
-
-        {/* Tips Section */}
-        <View style={styles.section}>
-          <Text style={styles.sectionTitle}>💡 Tips</Text>
-          <View style={styles.tipCard}>
-            <Text style={styles.tipText}>
-              <Text style={styles.tipBold}>Shorts Blocking:</Text> When disabled, Shorts URLs are automatically redirected to regular video format for a better viewing experience.
-            </Text>
-          </View>
-          <View style={styles.tipCard}>
-            <Text style={styles.tipText}>
-              <Text style={styles.tipBold}>Focus Mode:</Text> Perfect for studying or work - hides all distracting content including Shorts and recommendations.
-            </Text>
-          </View>
-          <View style={styles.tipCard}>
-            <Text style={styles.tipText}>
-              <Text style={styles.tipBold}>Draggable Button:</Text> The settings button in YouTube can be moved around the screen by pressing and dragging it to your preferred position.
-            </Text>
-          </View>
-          {user && (
-            <View style={styles.tipCard}>
-              <Text style={styles.tipText}>
-                <Text style={styles.tipBold}>Subscriptions:</Text> Access your subscriptions through the dedicated screen or the floating button in YouTube for controlled browsing.
-              </Text>
+        {/* Quick Presets */}
+        <ControlCard title="Quick Modes" icon="🎯">
+          <ScrollView horizontal showsHorizontalScrollIndicator={false}>
+            <View style={styles.presetsContainer}>
+              {builtInPresets.map((preset) => (
+                <PresetButton key={preset.id} preset={preset} />
+              ))}
             </View>
+          </ScrollView>
+        </ControlCard>
+
+        {/* Content Control */}
+        <ControlCard 
+          title="Content Control" 
+          subtitle="Toggle what content appears on YouTube"
+          icon="📺"
+        >
+          <ToggleRow
+            label="Home Recommendations"
+            description="Show video recommendations on YouTube home page"
+            value={settings.showRecommendations}
+            onToggle={(value) => handleSettingToggle('showRecommendations', value)}
+          />
+          <ToggleRow
+            label="Related Videos"
+            description="Show related videos when watching"
+            value={settings.showRelatedVideos}
+            onToggle={(value) => handleSettingToggle('showRelatedVideos', value)}
+          />
+          <ToggleRow
+            label="Comments"
+            description="Show comments section"
+            value={settings.showComments}
+            onToggle={(value) => handleSettingToggle('showComments', value)}
+          />
+          <ToggleRow
+            label="YouTube Shorts"
+            description="Show Shorts content and tab"
+            value={settings.showShorts}
+            onToggle={(value) => handleSettingToggle('showShorts', value)}
+          />
+        </ControlCard>
+
+        {/* Footer */}
+        <View style={styles.footer}>
+          <Text style={styles.footerText}>
+            Signed in as {user?.email}
+          </Text>
+          {lastSaved && (
+            <Text style={styles.footerSubtext}>
+              Settings last updated: {lastSaved.toLocaleString()}
+            </Text>
           )}
         </View>
       </ScrollView>
@@ -385,290 +302,230 @@ const HomeScreen: React.FC<Props> = ({ navigation }) => {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#f5f5f5',
+    backgroundColor: '#f8f9fa',
   },
-  scrollContent: {
-    padding: 20,
-  },
-  userSection: {
-    backgroundColor: 'white',
-    padding: 16,
-    borderRadius: 12,
-    marginBottom: 20,
+  header: {
+    backgroundColor: '#FF0000',
+    paddingHorizontal: 20,
+    paddingVertical: 16,
     flexDirection: 'row',
-    alignItems: 'center',
     justifyContent: 'space-between',
-    elevation: 2,
+    alignItems: 'center',
     shadowColor: '#000',
     shadowOffset: { width: 0, height: 2 },
     shadowOpacity: 0.1,
     shadowRadius: 4,
+    elevation: 4,
   },
-  userInfo: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    flex: 1,
+  headerTitle: {
+    fontSize: 24,
+    fontWeight: 'bold',
+    color: 'white',
   },
-  userAvatar: {
-    width: 48,
-    height: 48,
-    borderRadius: 24,
-    marginRight: 12,
+  headerSubtitle: {
+    fontSize: 14,
+    color: 'rgba(255, 255, 255, 0.9)',
+    marginTop: 2,
   },
-  userAvatarPlaceholder: {
-    width: 48,
-    height: 48,
-    borderRadius: 24,
-    backgroundColor: '#FF0000',
+  profileButton: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    backgroundColor: 'rgba(255, 255, 255, 0.2)',
     justifyContent: 'center',
     alignItems: 'center',
-    marginRight: 12,
   },
-  userAvatarText: {
+  profileButtonText: {
     color: 'white',
-    fontSize: 18,
+    fontSize: 16,
     fontWeight: 'bold',
   },
-  userDetails: {
+  scrollView: {
     flex: 1,
+    paddingHorizontal: 16,
   },
-  userName: {
-    fontSize: 16,
+  controlCard: {
+    backgroundColor: 'white',
+    borderRadius: 12,
+    marginVertical: 8,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.1,
+    shadowRadius: 4,
+    elevation: 3,
+  },
+  cardHeader: {
+    paddingHorizontal: 16,
+    paddingTop: 16,
+    paddingBottom: 12,
+    borderBottomWidth: 1,
+    borderBottomColor: '#f0f0f0',
+  },
+  cardTitleContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  cardIcon: {
+    fontSize: 20,
+    marginRight: 12,
+  },
+  cardTitle: {
+    fontSize: 18,
     fontWeight: '600',
     color: '#333',
   },
-  userEmail: {
-    fontSize: 14,
+  cardSubtitle: {
+    fontSize: 13,
     color: '#666',
     marginTop: 2,
   },
-  signOutButton: {
-    paddingHorizontal: 12,
-    paddingVertical: 6,
-    borderRadius: 6,
-    borderWidth: 1,
-    borderColor: '#FF6B6B',
-  },
-  signOutButtonText: {
-    color: '#FF6B6B',
-    fontSize: 12,
-    fontWeight: '500',
-  },
-  header: {
-    alignItems: 'center',
-    marginBottom: 30,
-  },
-  title: {
-    fontSize: 28,
-    fontWeight: 'bold',
-    color: '#333',
-    marginBottom: 8,
-  },
-  subtitle: {
-    fontSize: 16,
-    color: '#666',
-    textAlign: 'center',
-  },
-  section: {
-    marginBottom: 30,
-  },
-  sectionTitle: {
-    fontSize: 20,
-    fontWeight: '600',
-    color: '#333',
-    marginBottom: 8,
-  },
-  sectionDescription: {
-    fontSize: 14,
-    color: '#666',
-    marginBottom: 15,
-  },
-  modeCard: {
-    backgroundColor: 'white',
+  cardContent: {
     padding: 16,
-    borderRadius: 12,
-    marginBottom: 12,
-    elevation: 2,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.1,
-    shadowRadius: 4,
   },
-  modeHeader: {
+  currentModeContainer: {
     flexDirection: 'row',
+    justifyContent: 'space-between',
     alignItems: 'center',
-    marginBottom: 8,
   },
-  modeIcon: {
-    fontSize: 24,
-    marginRight: 12,
-  },
-  modeInfo: {
+  currentModeInfo: {
     flex: 1,
   },
-  modeName: {
-    fontSize: 18,
-    fontWeight: '600',
-    color: '#333',
-    marginBottom: 2,
+  currentModeName: {
+    fontSize: 20,
+    fontWeight: 'bold',
+    color: '#FF0000',
   },
-  modeDescription: {
-    fontSize: 14,
-    color: '#666',
-  },
-  modeSettings: {
-    backgroundColor: '#f8f9fa',
-    padding: 8,
-    borderRadius: 6,
-  },
-  modeSettingsText: {
+  customModeNote: {
     fontSize: 12,
     color: '#666',
-    fontWeight: '500',
+    marginTop: 2,
   },
-  settingsStatus: {
+  launchButton: {
+    backgroundColor: '#FF0000',
+    paddingHorizontal: 20,
+    paddingVertical: 12,
+    borderRadius: 25,
+  },
+  launchButtonText: {
+    color: 'white',
+    fontSize: 14,
+    fontWeight: '600',
+  },
+  presetsContainer: {
     flexDirection: 'row',
-    flexWrap: 'wrap',
-    gap: 8,
+    paddingRight: 16,
   },
-  statusIndicator: {
-    paddingHorizontal: 12,
-    paddingVertical: 6,
-    borderRadius: 20,
+  presetButton: {
+    width: 140,
+    marginRight: 12,
+    padding: 12,
+    borderRadius: 8,
+    backgroundColor: '#f8f9fa',
     borderWidth: 1,
+    borderColor: '#e9ecef',
   },
-  statusEnabled: {
-    backgroundColor: '#E8F5E8',
-    borderColor: '#4CAF50',
+  presetButtonActive: {
+    backgroundColor: '#FF0000',
+    borderColor: '#FF0000',
   },
-  statusDisabled: {
-    backgroundColor: '#FFF3F3',
-    borderColor: '#FF6B6B',
+  presetIcon: {
+    fontSize: 24,
+    textAlign: 'center',
+    marginBottom: 8,
+  },
+  presetName: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: '#333',
+    textAlign: 'center',
+    marginBottom: 4,
+  },
+  presetNameActive: {
+    color: 'white',
+  },
+  presetDescription: {
+    fontSize: 11,
+    color: '#666',
+    textAlign: 'center',
+    lineHeight: 14,
+  },
+  presetDescriptionActive: {
+    color: 'rgba(255, 255, 255, 0.9)',
+  },
+  activeIndicator: {
+    backgroundColor: 'rgba(255, 255, 255, 0.2)',
+    paddingHorizontal: 8,
+    paddingVertical: 2,
+    borderRadius: 10,
+    marginTop: 6,
+    alignSelf: 'center',
+  },
+  activeIndicatorText: {
+    color: 'white',
+    fontSize: 10,
+    fontWeight: 'bold',
+  },
+  toggleRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    paddingVertical: 12,
+    borderBottomWidth: 1,
+    borderBottomColor: '#f0f0f0',
+  },
+  toggleRowDisabled: {
+    opacity: 0.5,
+  },
+  toggleInfo: {
+    flex: 1,
+    paddingRight: 16,
+  },
+  toggleLabel: {
+    fontSize: 16,
+    fontWeight: '500',
+    color: '#333',
+  },
+  toggleLabelDisabled: {
+    color: '#999',
+  },
+  toggleDescription: {
+    fontSize: 13,
+    color: '#666',
+    marginTop: 2,
+    lineHeight: 16,
+  },
+  toggleDescriptionDisabled: {
+    color: '#ccc',
+  },
+  toggleContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
   },
   statusText: {
     fontSize: 12,
     fontWeight: '600',
-  },
-  statusTextEnabled: {
-    color: '#2E7D32',
+    marginRight: 8,
+    minWidth: 24,
   },
   statusTextDisabled: {
-    color: '#C62828',
+    color: '#ccc',
   },
-  buttonContainer: {
-    gap: 12,
-    marginBottom: 20,
+  switch: {
+    transform: [{ scaleX: 0.9 }, { scaleY: 0.9 }],
   },
-  button: {
-    padding: 16,
-    borderRadius: 12,
+  footer: {
+    paddingVertical: 24,
+    paddingHorizontal: 16,
     alignItems: 'center',
   },
-  primaryButton: {
-    backgroundColor: '#FF0000',
-  },
-  secondaryButton: {
-    backgroundColor: 'white',
-    borderWidth: 2,
-    borderColor: '#FF0000',
-  },
-  subscriptionsButton: {
-    backgroundColor: '#4285F4',
-  },
-  authButton: {
-    backgroundColor: '#4285F4',
-  },
-  primaryButtonText: {
-    color: 'white',
-    fontSize: 18,
-    fontWeight: '600',
-  },
-  secondaryButtonText: {
-    color: '#FF0000',
-    fontSize: 18,
-    fontWeight: '600',
-  },
-  subscriptionsButtonText: {
-    color: 'white',
-    fontSize: 18,
-    fontWeight: '600',
-  },
-  authButtonText: {
-    color: 'white',
-    fontSize: 18,
-    fontWeight: '600',
-  },
-  sectionHeader: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    marginBottom: 15,
-  },
-  seeAllButton: {
-    paddingHorizontal: 12,
-    paddingVertical: 6,
-    backgroundColor: '#FF0000',
-    borderRadius: 15,
-  },
-  seeAllText: {
-    color: 'white',
-    fontSize: 12,
-    fontWeight: '600',
-  },
-  loader: {
-    marginVertical: 20,
-  },
-  subscriptionsList: {
-    paddingRight: 10,
-  },
-  subscriptionItem: {
-    marginRight: 15,
-    alignItems: 'center',
-    width: 80,
-  },
-  subscriptionThumbnail: {
-    width: 60,
-    height: 60,
-    borderRadius: 30,
-    marginBottom: 8,
-  },
-  subscriptionTitle: {
-    fontSize: 12,
-    color: '#333',
-    textAlign: 'center',
-  },
-  subscriptionButton: {
-    backgroundColor: '#FF0000',
-    padding: 12,
-    borderRadius: 8,
-    alignItems: 'center',
-  },
-  subscriptionButtonText: {
-    color: 'white',
+  footerText: {
     fontSize: 14,
-    fontWeight: '600',
+    color: '#666',
   },
-  tipCard: {
-    backgroundColor: 'white',
-    padding: 14,
-    borderRadius: 10,
-    marginBottom: 10,
-    borderLeftWidth: 4,
-    borderLeftColor: '#FF0000',
-    elevation: 1,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 1 },
-    shadowOpacity: 0.1,
-    shadowRadius: 2,
-  },
-  tipText: {
-    fontSize: 14,
-    color: '#555',
-    lineHeight: 20,
-  },
-  tipBold: {
-    fontWeight: '600',
-    color: '#333',
+  footerSubtext: {
+    fontSize: 12,
+    color: '#999',
+    marginTop: 4,
   },
 });
 

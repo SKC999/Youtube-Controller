@@ -2,6 +2,12 @@
   "expo": {
     "name": "YouTube Controller",
     "slug": "youtube-controller",
+    "scheme": "youtube-controller",
+    "sdkVersion": "53.0.0",
+    "platforms": [
+      "ios",
+      "android"
+    ],
     "version": "1.0.0",
     "orientation": "portrait",
     "icon": "./assets/icon.png",
@@ -17,35 +23,82 @@
     "ios": {
       "supportsTablet": true,
       "bundleIdentifier": "com.locusflow.youtubecontroller",
-      "buildNumber": "12",
-      "deploymentTarget": "14.0",
+      "buildNumber": "24",
       "infoPlist": {
-        "ITSAppUsesNonExemptEncryption": false,
-        "NSAppTransportSecurity": {
-          "NSAllowsArbitraryLoads": false,
-          "NSExceptionDomains": {}
-        }
+        "CFBundleURLTypes": [
+          {
+            "CFBundleURLName": "youtube-controller",
+            "CFBundleURLSchemes": [
+              "youtube-controller"
+            ]
+          },
+          {
+            "CFBundleURLName": "google-oauth-ios",
+            "CFBundleURLSchemes": [
+              "com.googleusercontent.apps.398239762640-pcssb2kt1sf9ivsfmuouguiho27o8ssh"
+            ]
+          },
+          {
+            "CFBundleURLName": "youtube-controller",
+            "CFBundleURLSchemes": [
+              "youtube-controller"
+            ]
+          },
+          {
+            "CFBundleURLName": "google-oauth-ios",
+            "CFBundleURLSchemes": [
+              "com.googleusercontent.apps.398239762640-pcssb2kt1sf9ivsfmuouguiho27o8ssh"
+            ]
+          }
+        ],
+        "NSCameraUsageDescription": "This app does not use the camera.",
+        "NSMicrophoneUsageDescription": "This app does not use the microphone.",
+        "NSPhotoLibraryUsageDescription": "This app does not access your photo library.",
+        "ITSAppUsesNonExemptEncryption": false
       }
     },
     "android": {
-      "adaptiveIcon": {
-        "foregroundImage": "./assets/adaptive-icon.png",
-        "backgroundColor": "#FFFFFF"
-      },
-      "permissions": [],
-      "package": "com.locusflow.youtubecontroller"
+      "package": "com.locusflow.youtubecontroller",
+      "versionCode": 1,
+      "permissions": [
+        "android.permission.INTERNET",
+        "android.permission.SYSTEM_ALERT_WINDOW"
+      ],
+      "intentFilters": [
+        {
+          "action": "VIEW",
+          "data": [
+            {
+              "scheme": "youtube-controller"
+            },
+            {
+              "scheme": "com.googleusercontent.apps.398239762640-pcssb2kt1sf9ivsfmuouguiho27o8ssh"
+            }
+          ],
+          "category": [
+            "BROWSABLE",
+            "DEFAULT"
+          ]
+        }
+      ]
     },
-    "web": {
-      "favicon": "./assets/favicon.png"
+    "plugins": [
+      "expo-dev-client",
+      "expo-secure-store"
+    ],
+    "linking": {
+      "scheme": "youtube-controller",
+      "prefixes": [
+        "youtube-controller://",
+        "com.googleusercontent.apps.398239762640-pcssb2kt1sf9ivsfmuouguiho27o8ssh://",
+        "https://youtube-controller.app"
+      ]
     },
     "extra": {
       "eas": {
         "projectId": "736bcf92-94da-4e15-bf32-aabba2d5ac37"
       }
     },
-    "owner": "locusflow",
-    "plugins": [
-      "expo-secure-store"
-    ]
+    "owner": "locusflow"
   }
 }

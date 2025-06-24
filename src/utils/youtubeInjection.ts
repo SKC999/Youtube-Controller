@@ -1,7 +1,39 @@
 import { AppSettings } from '../hooks/useSettings';
 
-export const generateYouTubeCSS = (settings: AppSettings): string => {
+export const generateYouTubeCSS = (settings: AppSettings, isProduction: boolean = false): string => {
   let css = '';
+
+  // CRITICAL: Always ensure subscriptions tab is visible
+  css += `
+    /* ALWAYS show subscriptions tab regardless of other settings */
+    ytm-pivot-bar-renderer a[href*="/feed/subscriptions"],
+    ytm-pivot-bar-renderer [tab-identifier="FEsubscriptions"],
+    ytm-pivot-bar-item-renderer[tab-identifier="FEsubscriptions"],
+    ytm-pivot-bar-renderer [aria-label*="Subscriptions" i],
+    ytm-pivot-bar-renderer [title*="Subscriptions" i] {
+      display: flex !important;
+      visibility: visible !important;
+      opacity: 1 !important;
+      position: relative !important;
+      width: auto !important;
+      height: auto !important;
+      overflow: visible !important;
+      left: auto !important;
+    }
+    
+    /* Ensure pivot bar itself is visible */
+    ytm-pivot-bar-renderer {
+      display: flex !important;
+      visibility: visible !important;
+    }
+    
+    /* Force show all non-Shorts tabs */
+    ytm-pivot-bar-renderer ytm-pivot-bar-item-renderer:not([tab-identifier="FEshorts"]) {
+      display: flex !important;
+      visibility: visible !important;
+      flex: 1 !important;
+    }
+  `;
 
   // Hide recommendations on home page - Enhanced for all auth states
   if (!settings.showRecommendations) {
@@ -72,7 +104,7 @@ export const generateYouTubeCSS = (settings: AppSettings): string => {
       /* Show empty message on home page */
       body:not([data-page-type="subscriptions"]):not([data-page-type="watch"]) ytm-browse[role="main"]::after,
       ytm-browse[page-subtype="home"][role="main"]::after {
-        content: "Home recommendations hidden - Use search or the subscriptions tab to find videos";
+        content: "🎯 Home recommendations hidden\\A\\AUse the 📺 Subscriptions tab below or search to find videos";
         display: block !important;
         text-align: center;
         padding: 60px 20px;
@@ -85,12 +117,13 @@ export const generateYouTubeCSS = (settings: AppSettings): string => {
         background: #f9f9f9;
         border-radius: 8px;
         margin: 20px;
+        white-space: pre-line;
       }
       
       /* Different message for authenticated users */
       body[data-signed-in="true"]:not([data-page-type="subscriptions"]):not([data-page-type="watch"]) ytm-browse[role="main"]::after,
       body[data-signed-in="true"] ytm-browse[page-subtype="home"][role="main"]::after {
-        content: "Home feed hidden - Use search, subscriptions tab, or the subscription button in the YouTube Controller app";
+        content: "🎯 Home feed hidden\\A\\ATap the 📺 Subscriptions tab below to see your subscriptions\\Aor use search to find videos";
       }
       
       /* Make browse container relative for message positioning */
@@ -98,34 +131,6 @@ export const generateYouTubeCSS = (settings: AppSettings): string => {
       ytm-browse[page-subtype="home"][role="main"] {
         position: relative !important;
         min-height: 300px !important;
-      }
-      
-      /* ALWAYS keep search results visible */
-      ytm-search-results-container,
-      ytm-search ytm-compact-video-renderer,
-      ytm-search .compact-media-item,
-      ytm-section-list-renderer[data-content-type="search"],
-      ytm-search .search-results {
-        display: block !important;
-        visibility: visible !important;
-      }
-      
-      /* Keep navigation visible */
-      ytm-mobile-topbar-renderer,
-      ytm-pivot-bar-renderer,
-      ytm-searchbox,
-      .mobile-topbar-renderer,
-      .pivot-bar-container {
-        display: flex !important;
-        visibility: visible !important;
-      }
-      
-      /* Keep subscriptions tab visible and functional */
-      ytm-pivot-bar-renderer a[href*="/feed/subscriptions"],
-      ytm-pivot-bar-renderer [tab-identifier="FEsubscriptions"],
-      ytm-pivot-bar-item-renderer[tab-identifier="FEsubscriptions"] {
-        display: flex !important;
-        visibility: visible !important;
       }
     `;
   }
@@ -150,45 +155,45 @@ export const generateYouTubeCSS = (settings: AppSettings): string => {
     `;
   }
 
-  // Hide comments - Enhanced for all auth states BUT ALWAYS SHOW ON WATCH PAGES
+  // Hide comments - FIXED: Respect setting on ALL pages including watch pages
   if (!settings.showComments) {
     css += `
-      /* Hide comments on non-watch pages only */
-      body:not([data-page-type="watch"]) #comments,
-      body:not([data-page-type="watch"]) ytd-comments,
-      body:not([data-page-type="watch"]) ytm-comment-section-renderer,
-      body:not([data-page-type="watch"]) ytm-comments-entry-point-header-renderer,
-      body:not([data-page-type="watch"]) ytm-engagement-panel-section-list-renderer,
-      body:not([data-page-type="watch"]) .comment-section,
-      body:not([data-page-type="watch"]) [section-identifier="comment-item-section"],
-      body:not([data-page-type="watch"]) .comments-header,
-      body:not([data-page-type="watch"]) .comment-entries,
-      body:not([data-page-type="watch"]) ytm-comments-section-renderer,
-      body:not([data-page-type="watch"]) ytm-comment-thread-renderer,
-      body:not([data-page-type="watch"]) .comments-section,
-      body:not([data-page-type="watch"]) ytm-comments-entry-point-teaser-renderer,
-      body:not([data-page-type="watch"]) ytm-comments-entry-point-header-renderer {
+      /* Hide comments on ALL pages when setting is disabled */
+      #comments,
+      ytd-comments,
+      ytm-comment-section-renderer,
+      ytm-comments-entry-point-header-renderer,
+      ytm-engagement-panel-section-list-renderer,
+      .comment-section,
+      [section-identifier="comment-item-section"],
+      .comments-header,
+      .comment-entries,
+      ytm-comments-section-renderer,
+      ytm-comment-thread-renderer,
+      .comments-section,
+      ytm-comments-entry-point-teaser-renderer,
+      ytm-comments-entry-point-header-renderer,
+      
+      /* Mobile YouTube comment sections */
+      ytm-watch ytm-comment-section-renderer,
+      ytm-watch ytm-comments-entry-point-header-renderer,
+      ytm-watch ytm-comments-entry-point-teaser-renderer,
+      ytm-watch .comment-section,
+      ytm-watch .comments-section,
+      
+      /* Desktop YouTube comment sections */
+      ytd-watch-flexy #comments,
+      ytd-watch-flexy ytd-comments,
+      ytd-comments-entry-point-header-renderer,
+      ytd-comment-thread-renderer,
+      
+      /* Comments continuation and loading */
+      ytm-comments-continuation-renderer,
+      .comments-continuation {
         display: none !important;
         visibility: hidden !important;
-      }
-      
-      /* ALWAYS show comments on watch pages regardless of setting */
-      body[data-page-type="watch"] #comments,
-      body[data-page-type="watch"] ytd-comments,
-      body[data-page-type="watch"] ytm-comment-section-renderer,
-      body[data-page-type="watch"] ytm-comments-entry-point-header-renderer,
-      body[data-page-type="watch"] ytm-engagement-panel-section-list-renderer,
-      body[data-page-type="watch"] .comment-section,
-      body[data-page-type="watch"] [section-identifier="comment-item-section"],
-      body[data-page-type="watch"] .comments-header,
-      body[data-page-type="watch"] .comment-entries,
-      body[data-page-type="watch"] ytm-comments-section-renderer,
-      body[data-page-type="watch"] ytm-comment-thread-renderer,
-      body[data-page-type="watch"] .comments-section,
-      body[data-page-type="watch"] ytm-comments-entry-point-teaser-renderer,
-      body[data-page-type="watch"] ytm-comments-entry-point-header-renderer {
-        display: block !important;
-        visibility: visible !important;
+        height: 0 !important;
+        overflow: hidden !important;
       }
     `;
   }
@@ -251,28 +256,6 @@ export const generateYouTubeCSS = (settings: AppSettings): string => {
         visibility: hidden !important;
       }
       
-      /* ALWAYS ensure video player and description remain visible */
-      body[data-page-type="watch"] ytm-watch #player,
-      body[data-page-type="watch"] ytm-watch .player-container,
-      body[data-page-type="watch"] ytm-watch ytm-player,
-      body[data-page-type="watch"] ytm-watch .video-stream,
-      body[data-page-type="watch"] ytm-watch .html5-video-player,
-      body[data-page-type="watch"] ytm-watch ytm-slim-video-metadata-section-renderer,
-      body[data-page-type="watch"] ytm-watch ytm-video-metadata-section-renderer,
-      body[data-page-type="watch"] ytm-watch .video-primary-info,
-      body[data-page-type="watch"] ytm-watch .video-secondary-info,
-      body[data-page-type="watch"] ytm-watch .ytm-video-description,
-      body[data-page-type="watch"] ytm-watch .video-title,
-      body[data-page-type="watch"] ytm-watch .video-info,
-      body[data-page-type="watch"] ytm-watch .channel-info,
-      body[data-page-type="watch"] ytm-watch .subscribe-button,
-      body[data-page-type="watch"] ytm-watch .like-button-renderer,
-      body[data-page-type="watch"] ytm-watch .menu-renderer {
-        display: block !important;
-        visibility: visible !important;
-        opacity: 1 !important;
-      }
-      
       /* Expand video player when related videos are hidden */
       body[data-page-type="watch"] #player-container-outer {
         max-width: 100% !important;
@@ -280,58 +263,174 @@ export const generateYouTubeCSS = (settings: AppSettings): string => {
     `;
   }
 
-  // Hide Shorts - New feature for bottom bar and throughout the app
+  // Hide Shorts - Enhanced but NEVER hide subscriptions tab
   if (!settings.showShorts) {
     css += `
-      /* Hide Shorts tab in bottom navigation */
-      ytm-pivot-bar-renderer a[href*="/shorts"],
+      /* AGGRESSIVE Shorts hiding - Remove ALL Shorts elements but PRESERVE subscriptions tab */
+      
+      /* Hide Shorts tab in bottom navigation - VERY SPECIFIC targeting */
+      ytm-pivot-bar-renderer a[href*="/shorts"]:not([href*="/feed/subscriptions"]),
       ytm-pivot-bar-renderer [tab-identifier="FEshorts"],
       ytm-pivot-bar-item-renderer[tab-identifier="FEshorts"],
-      .pivot-shorts,
+      ytm-pivot-bar-renderer .pivot-shorts:not([href*="/feed/subscriptions"]),
+      .pivot-shorts:not([href*="/feed/subscriptions"]),
+      [aria-label*="Shorts" i]:not([href*="/feed/subscriptions"]):not([aria-label*="Subscriptions" i]),
+      [title*="Shorts" i]:not([href*="/feed/subscriptions"]):not([title*="Subscriptions" i]),
       
-      /* Hide Shorts content everywhere EXCEPT when it's the main video being watched */
-      body:not([data-page-type="watch"]) ytm-reel-shelf-renderer,
-      body:not([data-page-type="watch"]) ytm-reel-item-renderer,
-      body:not([data-page-type="watch"]) ytm-shorts-lockup-view-model,
-      body:not([data-page-type="watch"]) .reel-shelf-items,
-      body:not([data-page-type="watch"]) .shorts-container,
+      /* Hide Shorts content everywhere */
+      ytm-reel-shelf-renderer,
+      ytm-reel-item-renderer,
+      ytm-shorts-lockup-view-model,
+      .reel-shelf-items,
+      .shorts-container,
+      .reel-shelf,
+      .reel-item,
       
-      /* Hide Shorts on home page */
+      /* Hide Shorts on home page and browse pages */
       ytm-browse ytm-reel-shelf-renderer,
       ytm-browse .reel-shelf,
+      ytm-browse [data-content-type*="reel"],
+      ytm-browse [data-content-type*="shorts"],
       
       /* Hide Shorts in search results */
       ytm-search ytm-reel-item-renderer,
       ytm-search .reel-item,
+      ytm-search [data-content-type*="reel"],
       
-      /* Hide entire Shorts page UNLESS it's redirected to watch */
-      body:not([data-page-type="watch"]) ytm-reel-app-renderer,
-      body:not([data-page-type="watch"]) ytm-shorts-player-renderer,
+      /* Hide Shorts in recommendations when recommendations are enabled */
+      ytm-rich-item-renderer:has(a[href*="/shorts"]),
+      ytm-video-with-context-renderer:has(a[href*="/shorts"]),
+      .rich-item-renderer:has(a[href*="/shorts"]),
       
-      /* Hide Shorts player controls when not main video */
-      body:not([data-page-type="watch"]) .reel-player-overlay-actions,
-      body:not([data-page-type="watch"]) .reel-player-header,
+      /* Hide any element containing shorts URL but NOT subscriptions */
+      a[href*="/shorts"]:not([href*="/feed/subscriptions"]),
+      [href*="/shorts"]:not([href*="/feed/subscriptions"]),
+      
+      /* Hide Shorts player and app */
+      ytm-reel-app-renderer,
+      ytm-shorts-player-renderer,
+      .reel-player-overlay-actions,
+      .reel-player-header,
       
       /* Hide Shorts creation tools */
       .shorts-creation-guidance,
-      ytm-shorts-creation-entry-point-renderer {
+      ytm-shorts-creation-entry-point-renderer,
+      
+      /* Hide Shorts-related buttons and icons but preserve subscriptions */
+      [aria-label*="Shorts" i]:not([aria-label*="Subscriptions" i]),
+      [title*="Shorts" i]:not([title*="Subscriptions" i]),
+      .shorts-icon,
+      .yt-icon-shorts,
+      
+      /* Hide pivot bar items that contain "shorts" but not "subscriptions" */
+      ytm-pivot-bar-item-renderer:has([href*="/shorts"]):not(:has([href*="/feed/subscriptions"])),
+      
+      /* Use attribute selectors to catch dynamic content */
+      [data-tab-id*="shorts" i]:not([data-tab-id*="subscriptions" i]),
+      [data-page-type*="shorts" i],
+      [class*="shorts" i]:not(.video-title):not(.description):not([class*="subscriptions" i]),
+      [id*="shorts" i]:not(.video-title):not(.description):not([id*="subscriptions" i]),
+      
+      /* Hide Shorts thumbnails and previews */
+      .shorts-thumbnail,
+      .reel-video-thumbnail,
+      [data-video-type="shorts"],
+      
+      /* Force hide Shorts tab with maximum specificity but NEVER hide subscriptions */
+      body ytm-pivot-bar-renderer a[href*="/shorts"]:not([href*="/feed/subscriptions"]),
+      body ytm-pivot-bar-renderer [tab-identifier="FEshorts"],
+      body ytm-pivot-bar-item-renderer[tab-identifier="FEshorts"] {
         display: none !important;
         visibility: hidden !important;
+        opacity: 0 !important;
+        height: 0 !important;
+        width: 0 !important;
+        overflow: hidden !important;
+        position: absolute !important;
+        left: -9999px !important;
       }
       
-      /* ENSURE Shorts redirected to watch pages show properly */
-      body[data-page-type="watch"] ytm-watch #player,
-      body[data-page-type="watch"] ytm-watch .player-container,
-      body[data-page-type="watch"] ytm-watch ytm-player {
-        display: block !important;
+      /* BUT ALWAYS ensure subscriptions tab stays visible with higher specificity */
+      body ytm-pivot-bar-renderer a[href*="/feed/subscriptions"],
+      body ytm-pivot-bar-renderer [tab-identifier="FEsubscriptions"],
+      body ytm-pivot-bar-item-renderer[tab-identifier="FEsubscriptions"],
+      body ytm-pivot-bar-renderer [aria-label*="Subscriptions" i],
+      body ytm-pivot-bar-renderer [title*="Subscriptions" i] {
+        display: flex !important;
         visibility: visible !important;
+        opacity: 1 !important;
+        height: auto !important;
+        width: auto !important;
+        overflow: visible !important;
+        position: relative !important;
+        left: auto !important;
+        flex: 1 !important;
+      }
+      
+      /* Show message when Shorts are blocked */
+      body[data-page-type="shorts"] ytm-browse::before {
+        content: "🚫 YouTube Shorts blocked by YouTube Controller\\A\\AThis content has been redirected to regular video format";
+        display: block !important;
+        text-align: center;
+        padding: 40px 20px;
+        color: #d32f2f;
+        font-size: 16px;
+        white-space: pre-line;
+        background: #ffebee;
+        border-radius: 12px;
+        margin: 20px;
+        border-left: 4px solid #d32f2f;
       }
     `;
   }
 
-  // ALWAYS ENSURE CORE VIDEO WATCHING EXPERIENCE IS PRESERVED
+  // CRITICAL: Always ensure core navigation and subscriptions work
   css += `
-    /* CRITICAL: Always show video player and core video information on watch pages */
+    /* CRITICAL: Always show core navigation elements */
+    ytm-mobile-topbar-renderer,
+    ytm-pivot-bar-renderer,
+    ytm-searchbox,
+    .mobile-topbar-renderer,
+    .pivot-bar-container {
+      display: flex !important;
+      visibility: visible !important;
+    }
+    
+    /* CRITICAL: Always show subscriptions tab with highest priority */
+    ytm-pivot-bar-renderer a[href*="/feed/subscriptions"],
+    ytm-pivot-bar-renderer [tab-identifier="FEsubscriptions"],
+    ytm-pivot-bar-item-renderer[tab-identifier="FEsubscriptions"],
+    ytm-pivot-bar-renderer [aria-label*="Subscriptions" i],
+    ytm-pivot-bar-renderer [title*="Subscriptions" i] {
+      display: flex !important;
+      visibility: visible !important;
+      opacity: 1 !important;
+      position: relative !important;
+      height: auto !important;
+      width: auto !important;
+      overflow: visible !important;
+      left: auto !important;
+      right: auto !important;
+      top: auto !important;
+      bottom: auto !important;
+      flex: 1 !important;
+      z-index: 1000 !important;
+    }
+    
+    /* Ensure pivot bar flows properly */
+    ytm-pivot-bar-renderer {
+      display: flex !important;
+      justify-content: space-around !important;
+    }
+    
+    /* Make remaining tabs (after hiding Shorts) distribute evenly */
+    ytm-pivot-bar-renderer ytm-pivot-bar-item-renderer:not([tab-identifier="FEshorts"]) {
+      flex: 1 !important;
+      display: flex !important;
+      visibility: visible !important;
+    }
+    
+    /* ALWAYS ensure video player and description remain visible */
     body[data-page-type="watch"] ytm-watch #player,
     body[data-page-type="watch"] ytm-watch .player-container,
     body[data-page-type="watch"] ytm-watch ytm-player,
@@ -363,28 +462,36 @@ export const generateYouTubeCSS = (settings: AppSettings): string => {
       z-index: auto !important;
     }
     
-    /* Ensure video container takes proper space */
-    body[data-page-type="watch"] ytm-watch .watch-video,
-    body[data-page-type="watch"] ytm-watch .watch-main-col {
-      display: block !important;
-      visibility: visible !important;
-      max-width: 100% !important;
-    }
-    
-    /* Make sure watch page content is visible */
-    body[data-page-type="watch"] ytm-watch {
-      display: block !important;
-      visibility: visible !important;
-    }
-    
-    /* Override any hiding of the main watch content */
-    body[data-page-type="watch"] ytm-watch > *:first-child,
-    body[data-page-type="watch"] ytm-watch .watch-above-the-fold,
-    body[data-page-type="watch"] ytm-watch .watch-below-the-fold {
+    /* ALWAYS keep search results visible */
+    ytm-search-results-container,
+    ytm-search ytm-compact-video-renderer,
+    ytm-search .compact-media-item,
+    ytm-section-list-renderer[data-content-type="search"],
+    ytm-search .search-results {
       display: block !important;
       visibility: visible !important;
     }
   `;
+
+  // Add debug indicator ONLY in development
+  if (!isProduction) {
+    css += `
+      /* Debug indicator that shows the injection is working - DEVELOPMENT ONLY */
+      body::after {
+        content: "YTC Active";
+        position: fixed;
+        top: 5px;
+        right: 5px;
+        background: rgba(76, 175, 80, 0.8);
+        color: white;
+        padding: 2px 6px;
+        border-radius: 3px;
+        font-size: 10px;
+        z-index: 999999;
+        pointer-events: none;
+      }
+    `;
+  }
 
   // Add custom CSS if provided
   if (settings.customCSS && settings.customCSS.trim()) {
@@ -395,7 +502,10 @@ export const generateYouTubeCSS = (settings: AppSettings): string => {
 };
 
 export const createInjectionScript = (settings: AppSettings, isAuthenticated: boolean = false): string => {
-  const cssContent = generateYouTubeCSS(settings)
+  // Detect if this is a production build
+  const isProduction = !__DEV__;
+  
+  const cssContent = generateYouTubeCSS(settings, isProduction)
     .replace(/\\/g, '\\\\')
     .replace(/`/g, '\\`')
     .replace(/\$/g, '\\$')
@@ -406,13 +516,18 @@ export const createInjectionScript = (settings: AppSettings, isAuthenticated: bo
   return `
     (function() {
       try {
-        console.log('[YT Controller] Starting injection with settings:', JSON.stringify({
-          showRecommendations: ${settings.showRecommendations},
-          showShorts: ${settings.showShorts || true},
-          showComments: ${settings.showComments},
-          showRelatedVideos: ${settings.showRelatedVideos},
-          authenticated: ${isAuthenticated}
-        }));
+        const isProduction = ${isProduction};
+        const logPrefix = isProduction ? '[YT Controller]' : '[YT Controller - DEV]';
+        
+        if (!isProduction) {
+          console.log(logPrefix + ' Starting injection with settings:', JSON.stringify({
+            showRecommendations: ${settings.showRecommendations},
+            showShorts: ${settings.showShorts || true},
+            showComments: ${settings.showComments},
+            showRelatedVideos: ${settings.showRelatedVideos},
+            authenticated: ${isAuthenticated}
+          }));
+        }
         
         // IMMEDIATE page type detection before any other processing
         function detectPageType() {
@@ -437,13 +552,18 @@ export const createInjectionScript = (settings: AppSettings, isAuthenticated: bo
         document.body.setAttribute('data-page-type', initialPageType);
         document.body.setAttribute('data-signed-in', '${isAuthenticated}');
         
-        console.log('[YT Controller] Initial page type detected:', initialPageType);
+        if (!isProduction) {
+          console.log(logPrefix + ' Initial page type detected:', initialPageType);
+          console.log(logPrefix + ' Subscriptions tab will be ALWAYS VISIBLE');
+        }
         
         // Remove any existing controller styles
         const existingStyles = document.querySelectorAll('style[data-youtube-controller]');
         existingStyles.forEach(style => {
           style.remove();
-          console.log('[YT Controller] Removed existing style');
+          if (!isProduction) {
+            console.log(logPrefix + ' Removed existing style');
+          }
         });
         
         // Create and inject CSS IMMEDIATELY
@@ -456,7 +576,10 @@ export const createInjectionScript = (settings: AppSettings, isAuthenticated: bo
         const head = document.head || document.getElementsByTagName('head')[0];
         if (head) {
           head.appendChild(style);
-          console.log('[YT Controller] CSS injected immediately');
+          if (!isProduction) {
+            console.log(logPrefix + ' CSS injected immediately');
+            console.log(logPrefix + ' Subscriptions tab should now be visible');
+          }
         }
         
         // Function to update page attributes for YouTube elements
@@ -471,7 +594,9 @@ export const createInjectionScript = (settings: AppSettings, isAuthenticated: bo
             } else {
               browseEl.setAttribute('page-subtype', 'home');
             }
-            console.log('[YT Controller] Updated browse element page-subtype:', browseEl.getAttribute('page-subtype'));
+            if (!isProduction) {
+              console.log(logPrefix + ' Updated browse element page-subtype:', browseEl.getAttribute('page-subtype'));
+            }
           }
         }
         
@@ -485,7 +610,9 @@ export const createInjectionScript = (settings: AppSettings, isAuthenticated: bo
           // Stop after page seems loaded
           if (document.querySelector('ytm-browse[page-subtype]')) {
             clearInterval(attributeUpdateInterval);
-            console.log('[YT Controller] Page attributes finalized');
+            if (!isProduction) {
+              console.log(logPrefix + ' Page attributes finalized');
+            }
           }
         }, 100);
         
@@ -494,16 +621,31 @@ export const createInjectionScript = (settings: AppSettings, isAuthenticated: bo
           clearInterval(attributeUpdateInterval);
         }, 5000);
         
+        // Additional check specifically for subscriptions tab visibility
+        function ensureSubscriptionsTabVisible() {
+          const subscriptionsTab = document.querySelector('ytm-pivot-bar-renderer [tab-identifier="FEsubscriptions"], ytm-pivot-bar-renderer a[href*="/feed/subscriptions"]');
+          if (subscriptionsTab) {
+            subscriptionsTab.style.display = 'flex';
+            subscriptionsTab.style.visibility = 'visible';
+            subscriptionsTab.style.opacity = '1';
+            if (!isProduction) {
+              console.log(logPrefix + ' ✅ Subscriptions tab found and made visible');
+            }
+          } else {
+            if (!isProduction) {
+              console.log(logPrefix + ' ⚠️ Subscriptions tab not found, will retry...');
+            }
+          }
+        }
+        
+        // Ensure subscriptions tab is visible
+        setTimeout(ensureSubscriptionsTabVisible, 500);
+        setTimeout(ensureSubscriptionsTabVisible, 1000);
+        setTimeout(ensureSubscriptionsTabVisible, 2000);
+        
         // Handle Shorts blocking with URL redirection
         if (${!settings.showShorts}) {
           handleShortsBlocking();
-        }
-        
-        // Add subscription button if authenticated
-        if (${isAuthenticated}) {
-          setTimeout(() => {
-            addSubscriptionButton();
-          }, 1500);
         }
         
         // Monitor for navigation changes
@@ -517,6 +659,8 @@ export const createInjectionScript = (settings: AppSettings, isAuthenticated: bo
             location: window.location.href,
             authenticated: ${isAuthenticated},
             pageType: initialPageType,
+            subscriptionsTabVisible: true,
+            production: isProduction,
             settings: {
               showRecommendations: ${settings.showRecommendations},
               showComments: ${settings.showComments},
@@ -532,7 +676,9 @@ export const createInjectionScript = (settings: AppSettings, isAuthenticated: bo
             const videoId = window.location.pathname.split('/shorts/')[1];
             if (videoId) {
               const newUrl = \`https://m.youtube.com/watch?v=\${videoId}\`;
-              console.log('[YT Controller] Redirecting Shorts to regular video:', newUrl);
+              if (!isProduction) {
+                console.log(logPrefix + ' Redirecting Shorts to regular video:', newUrl);
+              }
               window.location.replace(newUrl);
               return;
             }
@@ -564,7 +710,9 @@ export const createInjectionScript = (settings: AppSettings, isAuthenticated: bo
             if (window.location.href !== currentUrl) {
               const oldUrl = currentUrl;
               currentUrl = window.location.href;
-              console.log('[YT Controller] Navigation detected from', oldUrl, 'to', currentUrl);
+              if (!isProduction) {
+                console.log(logPrefix + ' Navigation detected from', oldUrl, 'to', currentUrl);
+              }
               
               // Update page type immediately
               const newPageType = detectPageType();
@@ -574,12 +722,17 @@ export const createInjectionScript = (settings: AppSettings, isAuthenticated: bo
               // Update YouTube element attributes
               setTimeout(updateYouTubePageAttributes, 100);
               
+              // Ensure subscriptions tab stays visible after navigation
+              setTimeout(ensureSubscriptionsTabVisible, 300);
+              
               // Re-apply Shorts blocking if needed
               if (${!settings.showShorts} && currentUrl.includes('/shorts/')) {
                 setTimeout(handleShortsBlocking, 100);
               }
               
-              console.log('[YT Controller] Page type updated to:', newPageType);
+              if (!isProduction) {
+                console.log(logPrefix + ' Page type updated to:', newPageType);
+              }
             }
           });
           
@@ -591,88 +744,12 @@ export const createInjectionScript = (settings: AppSettings, isAuthenticated: bo
               const newPageType = detectPageType();
               document.body.setAttribute('data-page-type', newPageType);
               updateYouTubePageAttributes();
-              console.log('[YT Controller] Popstate - page type updated to:', newPageType);
+              ensureSubscriptionsTabVisible();
+              if (!isProduction) {
+                console.log(logPrefix + ' Popstate - page type updated to:', newPageType);
+              }
             }, 100);
           });
-        }
-        
-        function addSubscriptionButton() {
-          // Remove existing button
-          const existingButton = document.getElementById('yt-controller-sub-button');
-          if (existingButton) {
-            existingButton.remove();
-          }
-
-          // Don't show on Shorts pages (they get redirected anyway)
-          if (window.location.href.includes('/shorts/')) {
-            return;
-          }
-
-          // Create subscription button
-          const button = document.createElement('div');
-          button.id = 'yt-controller-sub-button';
-          button.style.cssText = \`
-            position: fixed;
-            bottom: 20px;
-            left: 50%;
-            transform: translateX(-50%);
-            background: linear-gradient(135deg, #FF0000, #CC0000);
-            color: white;
-            padding: 12px 24px;
-            border-radius: 25px;
-            box-shadow: 0 4px 12px rgba(0,0,0,0.3);
-            z-index: 999999;
-            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Arial, sans-serif;
-            font-size: 14px;
-            font-weight: 600;
-            cursor: pointer;
-            display: flex;
-            align-items: center;
-            gap: 8px;
-            user-select: none;
-            backdrop-filter: blur(10px);
-            border: 2px solid rgba(255,255,255,0.1);
-            transition: all 0.3s ease;
-          \`;
-          
-          button.innerHTML = '<span style="font-size: 16px;">📺</span><span>My Subscriptions</span>';
-
-          // Add click handler
-          button.addEventListener('click', function(e) {
-            e.preventDefault();
-            e.stopPropagation();
-            
-            // Add click animation
-            this.style.transform = 'translateX(-50%) scale(0.95)';
-            setTimeout(() => {
-              this.style.transform = 'translateX(-50%) scale(1)';
-            }, 100);
-            
-            if (window.ReactNativeWebView) {
-              window.ReactNativeWebView.postMessage(JSON.stringify({
-                type: 'show-subscriptions',
-                source: 'subscription-button'
-              }));
-            }
-          });
-
-          // Add hover effects
-          button.addEventListener('mouseenter', function() {
-            this.style.background = 'linear-gradient(135deg, #CC0000, #AA0000)';
-            this.style.transform = 'translateX(-50%) scale(1.05)';
-            this.style.boxShadow = '0 6px 16px rgba(0,0,0,0.4)';
-          });
-          
-          button.addEventListener('mouseleave', function() {
-            this.style.background = 'linear-gradient(135deg, #FF0000, #CC0000)';
-            this.style.transform = 'translateX(-50%) scale(1)';
-            this.style.boxShadow = '0 4px 12px rgba(0,0,0,0.3)';
-          });
-
-          // Add to page
-          document.body.appendChild(button);
-          
-          console.log('[YT Controller] Subscription button added');
         }
         
       } catch (error) {
