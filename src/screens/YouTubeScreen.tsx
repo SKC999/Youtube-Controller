@@ -314,54 +314,52 @@ const YouTubeScreen: React.FC<YouTubeScreenProps> = ({ navigation, route }) => {
       )}
 
       {/* Control Panel */}
-      {showControls && (
-        <View style={styles.controlPanel}>
-          <View style={styles.statusInfo}>
-            <Text style={styles.statusTitle}>YouTube Controller</Text>
-            <Text style={styles.statusText}>
-              Mode: {getCurrentMode()} • Page: {currentPageType}
-            </Text>
-            <Text style={styles.statusDetails}>
-              {hasInjected ? '✅ Settings Active' : '⏳ Loading...'}
-            </Text>
-          </View>
+      {/* Control Panel */}
+{showControls && (
+  <View style={styles.controlPanel}>
+    <View style={styles.statusInfo}>
+      <Text style={styles.statusTitle}>YouTube Controller</Text>
+      <Text style={styles.statusText}>
+        Mode: {getCurrentMode()} • Page: {currentPageType}
+      </Text>
+      <Text style={styles.statusDetails}>
+        {hasInjected ? '✅ Settings Active' : '⏳ Loading...'}
+      </Text>
+    </View>
 
-          <TouchableOpacity
-            style={styles.controlButton}
-            onPress={() => navigation.goBack()}
-          >
-            <Text style={styles.controlButtonText}>← Back to Home</Text>
-          </TouchableOpacity>
+    <TouchableOpacity
+      style={styles.controlButton}
+      onPress={() => navigation.goBack()}
+    >
+      <Text style={styles.controlButtonText}>← Back to Home</Text>
+    </TouchableOpacity>
 
-          <TouchableOpacity
-            style={[styles.controlButton, styles.primaryButton]}
-            onPress={() => setShowQuickSettings(true)}
-          >
-            <Text style={styles.controlButtonText}>🎛️ Quick Settings</Text>
-          </TouchableOpacity>
+    {/* REMOVED: Quick Settings button */}
 
-          <TouchableOpacity
-            style={styles.controlButton}
-            onPress={() => navigation.navigate('Settings')}
-          >
-            <Text style={styles.controlButtonText}>⚙️ Advanced Settings</Text>
-          </TouchableOpacity>
+    <TouchableOpacity
+      style={styles.controlButton}
+      onPress={() => navigation.navigate('Settings')}
+    >
+      <Text style={styles.controlButtonText}>⚙️ Advanced Settings</Text>
+    </TouchableOpacity>
 
-          <TouchableOpacity
-            style={[styles.controlButton, styles.refreshButton]}
-            onPress={refreshInjection}
-          >
-            <Text style={styles.controlButtonText}>🔄 Refresh Settings</Text>
-          </TouchableOpacity>
+    <TouchableOpacity
+      style={[styles.controlButton, styles.refreshButton]}
+      onPress={refreshInjection}
+    >
+      <Text style={styles.controlButtonText}>🔄 Refresh Settings</Text>
+    </TouchableOpacity>
 
-          <TouchableOpacity
-            style={[styles.controlButton, styles.closeButton]}
-            onPress={() => setShowControls(false)}
-          >
-            <Text style={styles.controlButtonText}>✕ Close</Text>
-          </TouchableOpacity>
-        </View>
-      )}
+    <TouchableOpacity
+      style={[styles.controlButton, styles.closeButton]}
+      onPress={() => setShowControls(false)}
+    >
+      <Text style={styles.controlButtonText}>✕ Close</Text>
+    </TouchableOpacity>
+  </View>
+)}
+
+{/* REMOVED: QuickSettings Modal */}
 
       {/* Quick Settings Modal */}
       <QuickSettings

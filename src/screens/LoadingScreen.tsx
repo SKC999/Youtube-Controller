@@ -33,7 +33,7 @@ const LoadingScreen = () => {
 
   return (
     <View style={styles.container}>
-      <Text style={styles.title}>YouTube Controller</Text>
+      <Text style={styles.title}>Content Controller</Text>
       <ActivityIndicator size="large" color="#FF0000" style={styles.loader} />
       <Text style={styles.subtitle}>Loading...</Text>
     </View>

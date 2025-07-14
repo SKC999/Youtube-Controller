@@ -54,7 +54,7 @@ const AuthScreen = () => {
   return (
     <SafeAreaView style={styles.container}>
       <View style={styles.content}>
-        <Text style={styles.title}>YouTube Controller</Text>
+        <Text style={styles.title}>Content Controller</Text>
         <Text style={styles.subtitle}>Take control of your YouTube experience</Text>
         
         <View style={styles.featuresContainer}>

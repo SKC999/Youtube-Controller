@@ -203,7 +203,7 @@ const HomeScreen = () => {
       {/* Header */}
       <View style={styles.header}>
         <View>
-          <Text style={styles.headerTitle}>YouTube Controller</Text>
+          <Text style={styles.headerTitle}>Content Controller</Text>
           <Text style={styles.headerSubtitle}>
             Welcome back, {user?.name?.split(' ')[0] || 'User'}
           </Text>
