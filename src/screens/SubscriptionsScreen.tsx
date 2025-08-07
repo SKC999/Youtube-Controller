@@ -17,32 +17,12 @@ import {
 import { StackScreenProps } from '@react-navigation/stack';
 import { useAuth } from '../hooks/useAuth';
 import { RootStackParamList } from '../../App';
+import { useSmartNotificationManager, Subscription, SubscriptionUtils } from '../utils/notificationUtils';
 
 // Use StackScreenProps instead of custom interface
 interface Props {
   navigation: any;
   route?: any;
-}
-
-interface Subscription {
-  id: string;
-  snippet: {
-    title: string;
-    description: string;
-    thumbnails: {
-      default: { url: string };
-      medium: { url: string };
-      high: { url: string };
-    };
-    resourceId: {
-      channelId: string;
-    };
-    publishedAt: string;
-  };
-  contentDetails: {
-    totalItemCount: number;
-    newItemCount: number;
-  };
 }
 
 interface ChannelInfo {
@@ -66,6 +46,16 @@ interface ChannelInfo {
 
 const SubscriptionsScreen: React.FC<Props> = ({ navigation }) => {
   const { user } = useAuth();
+  
+  // Smart notification manager
+  const {
+    loadClearedNotifications,
+    clearChannelNotification,
+    applySmartNotificationClearing,
+    cleanupOldNotifications,
+    getStats
+  } = useSmartNotificationManager();
+  
   const [subscriptions, setSubscriptions] = useState<Subscription[]>([]);
   const [filteredSubscriptions, setFilteredSubscriptions] = useState<Subscription[]>([]);
   const [loading, setLoading] = useState(true);
@@ -80,6 +70,7 @@ const SubscriptionsScreen: React.FC<Props> = ({ navigation }) => {
 
   useEffect(() => {
     if (user?.accessToken) {
+      loadClearedNotifications();
       fetchSubscriptions();
     } else {
       setLoading(false);
@@ -131,10 +122,16 @@ const SubscriptionsScreen: React.FC<Props> = ({ navigation }) => {
 
       const data = await makeAPICall(`/subscriptions?${params}`);
       
+      // Apply smart notification clearing to fetched data
+      const rawSubscriptions = data.items || [];
+      const smartClearedSubscriptions = applySmartNotificationClearing(rawSubscriptions);
+      
       if (pageToken) {
-        setSubscriptions(prev => [...prev, ...data.items]);
+        setSubscriptions(prev => [...prev, ...smartClearedSubscriptions]);
       } else {
-        setSubscriptions(data.items || []);
+        setSubscriptions(smartClearedSubscriptions);
+        // Clean up old notifications
+        await cleanupOldNotifications(rawSubscriptions);
       }
       
       setNextPageToken(data.nextPageToken || null);
@@ -194,6 +191,23 @@ const SubscriptionsScreen: React.FC<Props> = ({ navigation }) => {
     }
   };
 
+  // Smart notification clearing
+  const handleChannelNotificationClear = async (channelId: string, channelTitle: string, currentNewCount: number) => {
+    if (currentNewCount > 0) {
+      await clearChannelNotification(channelId, currentNewCount, channelTitle);
+      
+      // Update local state immediately
+      setSubscriptions(prevSubscriptions => 
+        applySmartNotificationClearing(prevSubscriptions)
+      );
+      setFilteredSubscriptions(prevFiltered =>
+        applySmartNotificationClearing(prevFiltered)
+      );
+
+      console.log(`Smart cleared ${currentNewCount} notifications for ${channelTitle}. New videos will still show notifications.`);
+    }
+  };
+
   const handleRefresh = useCallback(() => {
     setRefreshing(true);
     setNextPageToken(null);
@@ -209,13 +223,24 @@ const SubscriptionsScreen: React.FC<Props> = ({ navigation }) => {
 
   const handleChannelPress = async (subscription: Subscription) => {
     const channelId = subscription.snippet.resourceId.channelId;
+    const channelTitle = subscription.snippet.title;
+    const currentNewCount = subscription.contentDetails?.newItemCount || 0;
+    
+    // Clear notifications immediately when channel is pressed
+    await handleChannelNotificationClear(channelId, channelTitle, currentNewCount);
     
     setShowChannelModal(true);
     await fetchChannelDetails(channelId);
   };
 
-  const navigateToChannel = (channelId: string, channelTitle: string) => {
+  const navigateToChannel = async (channelId: string, channelTitle: string) => {
     setShowChannelModal(false);
+    
+    // Additional clearing when navigating to YouTube (just in case)
+    const currentSub = subscriptions.find(sub => sub.snippet.resourceId.channelId === channelId);
+    if (currentSub?.contentDetails?.newItemCount > 0) {
+      await handleChannelNotificationClear(channelId, channelTitle, currentSub.contentDetails.newItemCount);
+    }
     
     Alert.alert(
       'Open Channel',
@@ -252,66 +277,47 @@ const SubscriptionsScreen: React.FC<Props> = ({ navigation }) => {
     );
   };
 
-  const formatSubscriberCount = (count: string) => {
-    const num = parseInt(count);
-    if (num >= 1000000) {
-      return `${(num / 1000000).toFixed(1)}M`;
-    } else if (num >= 1000) {
-      return `${(num / 1000).toFixed(1)}K`;
-    }
-    return num.toString();
-  };
-
-  const formatPublishedDate = (dateString: string) => {
-    const date = new Date(dateString);
-    const now = new Date();
-    const diffTime = Math.abs(now.getTime() - date.getTime());
-    const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
+  const renderSubscription = ({ item }: { item: Subscription }) => {
+    const newCount = item.contentDetails?.newItemCount || 0;
     
-    if (diffDays === 1) return 'Yesterday';
-    if (diffDays < 7) return `${diffDays} days ago`;
-    if (diffDays < 30) return `${Math.ceil(diffDays / 7)} weeks ago`;
-    if (diffDays < 365) return `${Math.ceil(diffDays / 30)} months ago`;
-    return `${Math.ceil(diffDays / 365)} years ago`;
-  };
-
-  const renderSubscription = ({ item }: { item: Subscription }) => (
-    <TouchableOpacity
-      style={styles.subscriptionItem}
-      onPress={() => handleChannelPress(item)}
-    >
-      <Image
-        source={{ uri: item.snippet.thumbnails.medium?.url || item.snippet.thumbnails.default.url }}
-        style={styles.channelThumbnail}
-      />
-      <View style={styles.channelInfo}>
-        <Text style={styles.channelTitle} numberOfLines={1}>
-          {item.snippet.title}
-        </Text>
-        <Text style={styles.channelDescription} numberOfLines={2}>
-          {item.snippet.description || 'No description available'}
-        </Text>
-        <View style={styles.channelStats}>
-          <Text style={styles.statText}>
-            Subscribed {formatPublishedDate(item.snippet.publishedAt)}
+    return (
+      <TouchableOpacity
+        style={styles.subscriptionItem}
+        onPress={() => handleChannelPress(item)}
+      >
+        <Image
+          source={{ uri: item.snippet.thumbnails.medium?.url || item.snippet.thumbnails.default.url }}
+          style={styles.channelThumbnail}
+        />
+        <View style={styles.channelInfo}>
+          <Text style={styles.channelTitle} numberOfLines={1}>
+            {item.snippet.title}
           </Text>
-          {item.contentDetails?.totalItemCount && (
+          <Text style={styles.channelDescription} numberOfLines={2}>
+            {item.snippet.description || 'No description available'}
+          </Text>
+          <View style={styles.channelStats}>
             <Text style={styles.statText}>
-              • {item.contentDetails.totalItemCount} videos
+              Subscribed {SubscriptionUtils.formatPublishedDate(item.snippet.publishedAt)}
             </Text>
-          )}
-          {item.contentDetails?.newItemCount > 0 && (
-            <View style={styles.newBadge}>
-              <Text style={styles.newBadgeText}>
-                {item.contentDetails.newItemCount} new
+            {item.contentDetails?.totalItemCount ? (
+              <Text style={styles.statText}>
+                • {item.contentDetails.totalItemCount} videos
               </Text>
-            </View>
-          )}
+            ) : null}
+            {newCount > 0 && (
+              <View style={styles.newBadge}>
+                <Text style={styles.newBadgeText}>
+                  {newCount} new
+                </Text>
+              </View>
+            )}
+          </View>
         </View>
-      </View>
-      <Text style={styles.arrowIcon}>→</Text>
-    </TouchableOpacity>
-  );
+        <Text style={styles.arrowIcon}>→</Text>
+      </TouchableOpacity>
+    );
+  };
 
   const renderChannelVideo = ({ item }: { item: any }) => (
     <TouchableOpacity
@@ -327,7 +333,7 @@ const SubscriptionsScreen: React.FC<Props> = ({ navigation }) => {
           {item.snippet.title}
         </Text>
         <Text style={styles.videoDate}>
-          {formatPublishedDate(item.snippet.publishedAt)}
+          {SubscriptionUtils.formatPublishedDate(item.snippet.publishedAt)}
         </Text>
       </View>
     </TouchableOpacity>
@@ -369,13 +375,22 @@ const SubscriptionsScreen: React.FC<Props> = ({ navigation }) => {
     );
   }
 
+  // Calculate stats for display
+  const totalNewVideos = SubscriptionUtils.getTotalNewItemCount(filteredSubscriptions);
+  const channelsWithNewContent = SubscriptionUtils.getSubscriptionsWithNewContent(filteredSubscriptions).length;
+
   return (
     <SafeAreaView style={styles.container}>
       <View style={styles.header}>
         <Text style={styles.headerTitle}>My Subscriptions</Text>
         <Text style={styles.subscriptionCount}>
           {filteredSubscriptions.length} channel{filteredSubscriptions.length !== 1 ? 's' : ''}
-          {searchQuery && ` (filtered)`}
+          {searchQuery ? ` (filtered)` : ''}
+          {totalNewVideos > 0 && (
+            <Text style={styles.newContentIndicator}>
+              {' • '}{totalNewVideos} new video{totalNewVideos !== 1 ? 's' : ''} from {channelsWithNewContent} channel{channelsWithNewContent !== 1 ? 's' : ''}
+            </Text>
+          )}
         </Text>
       </View>
       
@@ -471,7 +486,7 @@ const SubscriptionsScreen: React.FC<Props> = ({ navigation }) => {
                   {selectedChannel.snippet.title}
                 </Text>
                 <Text style={styles.channelHeaderStats}>
-                  {formatSubscriberCount(selectedChannel.statistics.subscriberCount)} subscribers • {' '}
+                  {SubscriptionUtils.formatSubscriberCount(selectedChannel.statistics.subscriberCount)} subscribers • {' '}
                   {selectedChannel.statistics.videoCount} videos
                 </Text>
                 <Text style={styles.channelHeaderDescription} numberOfLines={3}>
@@ -538,6 +553,10 @@ const styles = StyleSheet.create({
     fontSize: 14,
     color: '#666',
     marginTop: 5,
+  },
+  newContentIndicator: {
+    color: '#FF0000',
+    fontWeight: '600',
   },
   searchContainer: {
     backgroundColor: 'white',

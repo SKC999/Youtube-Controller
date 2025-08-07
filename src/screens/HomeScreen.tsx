@@ -10,12 +10,18 @@ import {
   Alert,
   Dimensions,
   StatusBar,
+  Image,
+  FlatList,
+  ActivityIndicator,
+  RefreshControl,
 } from 'react-native';
 import { useNavigation } from '@react-navigation/native';
 import { StackNavigationProp } from '@react-navigation/stack';
 import { RootStackParamList } from '../../App';
 import { useAuth } from '../hooks/useAuth';
 import { useSettings } from '../hooks/useSettings';
+import { useSmartNotificationManager, Subscription } from '../utils/notificationUtils';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 
 type HomeScreenNavigationProp = StackNavigationProp<RootStackParamList, 'Home'>;
 
@@ -23,7 +29,7 @@ const { width } = Dimensions.get('window');
 
 const HomeScreen = () => {
   const navigation = useNavigation<HomeScreenNavigationProp>();
-  const { user, signOut } = useAuth();
+  const { user, signOut, refreshAccessToken } = useAuth();
   const { 
     settings, 
     updateSettings, 
@@ -33,12 +39,124 @@ const HomeScreen = () => {
     loading 
   } = useSettings();
   
+  // Smart notification manager
+  const {
+    loadClearedNotifications,
+    clearChannelNotification,
+    applySmartNotificationClearing,
+    cleanupOldNotifications,
+    getStats
+  } = useSmartNotificationManager();
+  
+  // Subscriptions state
+  const [subscriptions, setSubscriptions] = useState<Subscription[]>([]);
+  const [loadingSubscriptions, setLoadingSubscriptions] = useState(false);
+  const [subscriptionsError, setSubscriptionsError] = useState<string | null>(null);
   const [lastSaved, setLastSaved] = useState<Date | null>(null);
+  const [showAllSubscriptions, setShowAllSubscriptions] = useState(false);
 
   // Track when settings are updated
   useEffect(() => {
     setLastSaved(new Date());
   }, [settings]);
+
+  // Load cleared notifications on component mount
+  useEffect(() => {
+    loadClearedNotifications();
+  }, []);
+
+  // Fetch subscriptions on component mount
+  useEffect(() => {
+    if (user?.accessToken) {
+      fetchSubscriptions();
+    }
+  }, [user]);
+
+  const makeAPICall = async (endpoint: string, retryCount = 0): Promise<any> => {
+    // Get the current token, either from user state or directly from storage on retry
+    let currentToken = user?.accessToken;
+    if (retryCount > 0) {
+      // On retry, get the fresh token from storage
+      currentToken = await AsyncStorage.getItem('accessToken');
+    }
+    
+    if (!currentToken) {
+      throw new Error('User not authenticated');
+    }
+
+    const response = await fetch(`https://www.googleapis.com/youtube/v3${endpoint}`, {
+      headers: {
+        'Authorization': `Bearer ${currentToken}`,
+        'Content-Type': 'application/json',
+      },
+    });
+
+    if (response.status === 401 && retryCount === 0) {
+      console.log('Access token expired, attempting refresh...');
+      const refreshed = await refreshAccessToken();
+      if (refreshed) {
+        console.log('Token refreshed, retrying API call...');
+        return makeAPICall(endpoint, 1); // Retry once with new token
+      } else {
+        console.log('Token refresh failed, signing out user...');
+        await signOut();
+        navigation.replace('Auth');
+        throw new Error('Authentication expired. Please sign in again.');
+      }
+    }
+
+    if (!response.ok) {
+      throw new Error(`API call failed: ${response.status}`);
+    }
+
+    return response.json();
+  };
+
+  const fetchSubscriptions = async (showAlert: boolean = false) => {
+    if (!user?.accessToken) return;
+
+    try {
+      setLoadingSubscriptions(true);
+      setSubscriptionsError(null);
+
+      const params = new URLSearchParams({
+        part: 'snippet,contentDetails',
+        mine: 'true',
+        maxResults: '50',
+        order: 'alphabetical',
+      });
+
+      const data = await makeAPICall(`/subscriptions?${params}`);
+      
+      // Apply smart notification clearing to fetched data
+      const rawSubscriptions = data.items || [];
+      const smartClearedSubscriptions = applySmartNotificationClearing(rawSubscriptions);
+      setSubscriptions(smartClearedSubscriptions);
+      
+      // Clean up old notifications
+      await cleanupOldNotifications(rawSubscriptions);
+      
+      if (showAlert && rawSubscriptions.length > 0) {
+        const stats = getStats();
+        const totalNewVideos = smartClearedSubscriptions.reduce((sum, sub) => 
+          sum + (sub.contentDetails?.newItemCount || 0), 0
+        );
+        
+        Alert.alert(
+          'Subscriptions Loaded', 
+          `${rawSubscriptions.length} channels loaded\n${totalNewVideos} new videos to watch`
+        );
+      }
+    } catch (error) {
+      console.error('Error fetching subscriptions:', error);
+      setSubscriptionsError('Failed to load subscriptions');
+      if (showAlert) {
+        Alert.alert('Error', 'Failed to load subscriptions. Please check your connection and try again.');
+      }
+    } finally {
+      setLoadingSubscriptions(false);
+    }
+  };
 
   const handleSignOut = async () => {
     Alert.alert(
@@ -93,8 +211,57 @@ const HomeScreen = () => {
     navigation.navigate('YouTube');
   };
 
+  // UPDATED: Smart notification clearing that allows new videos to show
+  const handleChannelNotificationClear = async (channelId: string, channelTitle: string, currentNewCount: number) => {
+    // Clear using smart system that tracks the count
+    await clearChannelNotification(channelId, currentNewCount, channelTitle);
+    
+    // Update local state immediately to provide instant feedback
+    setSubscriptions(prevSubscriptions => 
+      applySmartNotificationClearing(prevSubscriptions)
+    );
+
+    console.log(`Cleared ${currentNewCount} notifications for ${channelTitle}. New videos posted after this will still show notifications.`);
+  };
+
+  const handleChannelPress = (subscription: Subscription) => {
+    const channelId = subscription.snippet.resourceId.channelId;
+    const channelTitle = subscription.snippet.title;
+    const currentNewCount = subscription.contentDetails?.newItemCount || 0;
+    
+    Alert.alert(
+      'Open Channel',
+      `Open ${channelTitle} in YouTube?${currentNewCount > 0 ? `` : ''}`,
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Open Channel',
+          onPress: async () => {
+            // Clear notifications if there are any
+            if (currentNewCount > 0) {
+              await handleChannelNotificationClear(channelId, channelTitle, currentNewCount);
+            }
+            
+            // Navigate to YouTube
+            navigation.navigate('YouTube', { 
+              channelId, 
+              channelTitle 
+            });
+          },
+        },
+      ]
+    );
+  };
+
+  const handleViewAllSubscriptions = () => {
+    navigation.navigate('Subscriptions');
+  };
+
   const currentMode = getCurrentMode();
   const isCustomMode = currentMode === 'Custom';
+
+  // Display subscriptions (show max 6 on home screen)
+  const displaySubscriptions = showAllSubscriptions ? subscriptions : subscriptions.slice(0, 6);
 
   // Status indicators
   const getStatusColor = (enabled: boolean) => enabled ? '#4CAF50' : '#f44336';
@@ -196,6 +363,32 @@ const HomeScreen = () => {
     );
   };
 
+  const SubscriptionItem = ({ subscription }: { subscription: Subscription }) => {
+    const newCount = subscription.contentDetails?.newItemCount || 0;
+    
+    return (
+      <TouchableOpacity
+        style={styles.subscriptionItem}
+        onPress={() => handleChannelPress(subscription)}
+      >
+        <Image
+          source={{ uri: subscription.snippet.thumbnails.medium?.url || subscription.snippet.thumbnails.default.url }}
+          style={styles.subscriptionThumbnail}
+        />
+        <Text style={styles.subscriptionTitle} numberOfLines={2}>
+          {subscription.snippet.title}
+        </Text>
+        {newCount > 0 && (
+          <View style={styles.newBadge}>
+            <Text style={styles.newBadgeText}>
+              {newCount}
+            </Text>
+          </View>
+        )}
+      </TouchableOpacity>
+    );
+  };
+
   return (
     <SafeAreaView style={styles.container}>
       <StatusBar barStyle="light-content" backgroundColor="#FF0000" />
@@ -215,7 +408,18 @@ const HomeScreen = () => {
         </TouchableOpacity>
       </View>
 
-      <ScrollView style={styles.scrollView} showsVerticalScrollIndicator={false}>
+      <ScrollView 
+        style={styles.scrollView} 
+        showsVerticalScrollIndicator={false}
+        refreshControl={
+          <RefreshControl
+            refreshing={loadingSubscriptions}
+            onRefresh={() => fetchSubscriptions(true)}
+            colors={['#FF0000']}
+            tintColor="#FF0000"
+          />
+        }
+      >
         {/* Current Mode Status */}
         <ControlCard 
           title="Current Mode" 
@@ -238,6 +442,76 @@ const HomeScreen = () => {
               <Text style={styles.launchButtonText}>🚀 Launch YouTube</Text>
             </TouchableOpacity>
           </View>
+        </ControlCard>
+
+        {/* My Subscriptions Section */}
+        <ControlCard 
+          title="My Subscriptions" 
+          subtitle={
+            subscriptions.length > 0 
+              ? `${subscriptions.length} channels • ${subscriptions.reduce((sum, sub) => sum + (sub.contentDetails?.newItemCount || 0), 0)} new videos`
+              : 'Loading...'
+          }
+          icon="📺"
+        >
+          {loadingSubscriptions ? (
+            <View style={styles.subscriptionsLoading}>
+              <ActivityIndicator size="small" color="#FF0000" />
+              <Text style={styles.loadingText}>Loading subscriptions...</Text>
+            </View>
+          ) : subscriptionsError ? (
+            <View style={styles.subscriptionsError}>
+              <Text style={styles.errorText}>Failed to load subscriptions</Text>
+              <TouchableOpacity 
+                style={styles.retryButton}
+                onPress={() => fetchSubscriptions(true)}
+              >
+                <Text style={styles.retryButtonText}>Retry</Text>
+              </TouchableOpacity>
+            </View>
+          ) : subscriptions.length > 0 ? (
+            <>
+              <FlatList
+                data={displaySubscriptions}
+                renderItem={({ item }) => <SubscriptionItem subscription={item} />}
+                keyExtractor={(item) => item.id}
+                numColumns={3}
+                scrollEnabled={false}
+                contentContainerStyle={styles.subscriptionsGrid}
+              />
+              <View style={styles.subscriptionsActions}>
+                {subscriptions.length > 6 && (
+                  <TouchableOpacity
+                    style={styles.showMoreButton}
+                    onPress={() => setShowAllSubscriptions(!showAllSubscriptions)}
+                  >
+                    <Text style={styles.showMoreButtonText}>
+                      {showAllSubscriptions ? 'Show Less' : `Show All (${subscriptions.length})`}
+                    </Text>
+                  </TouchableOpacity>
+                )}
+                <TouchableOpacity
+                  style={styles.viewAllButton}
+                  onPress={handleViewAllSubscriptions}
+                >
+                  <Text style={styles.viewAllButtonText}>Full Subscriptions View</Text>
+                </TouchableOpacity>
+              </View>
+            </>
+          ) : (
+            <View style={styles.noSubscriptions}>
+              <Text style={styles.noSubscriptionsText}>No subscriptions found</Text>
+              <Text style={styles.noSubscriptionsSubtext}>
+                Subscribe to channels on YouTube to see them here
+              </Text>
+              <TouchableOpacity
+                style={styles.exploreButton}
+                onPress={openYouTubeWithSettings}
+              >
+                <Text style={styles.exploreButtonText}>Explore YouTube</Text>
+              </TouchableOpacity>
+            </View>
+          )}
         </ControlCard>
 
         {/* Quick Presets */}
@@ -281,6 +555,65 @@ const HomeScreen = () => {
             value={settings.showShorts}
             onToggle={(value) => handleSettingToggle('showShorts', value)}
           />
+        </ControlCard>
+
+        <ControlCard 
+          title="Platform Status" 
+          subtitle="Current capabilities and limitations"
+          icon="ℹ️"
+        >
+          <View style={styles.platformStatusContainer}>
+            {/* What's Working Section */}
+            <View style={styles.statusSection}>
+              <View style={styles.statusHeader}>
+                <Text style={styles.statusIconSuccess}>✅</Text>
+                <Text style={styles.statusTitle}>What's Working</Text>
+              </View>
+              <View style={styles.statusList}>
+                <View style={styles.statusItem}>
+                  <Text style={styles.statusBullet}>•</Text>
+                  <Text style={styles.statusText}>View subscriptions and content</Text>
+                </View>
+                <View style={styles.statusItem}>
+                  <Text style={styles.statusBullet}>•</Text>
+                  <Text style={styles.statusText}>Control YouTube interface (hide distractions)</Text>
+                </View>
+                <View style={styles.statusItem}>
+                  <Text style={styles.statusBullet}>•</Text>
+                  <Text style={styles.statusText}>Watch videos with custom settings</Text>
+                </View>
+                <View style={styles.statusItem}>
+                  <Text style={styles.statusBullet}>•</Text>
+                  <Text style={styles.statusText}>Navigate channels and playlists</Text>
+                </View>
+              </View>
+            </View>
+
+            {/* Current Limitations Section */}
+            <View style={[styles.statusSection, styles.statusSectionLast]}>
+              <View style={styles.statusHeader}>
+                <Text style={styles.statusIconWarning}>⚠️</Text>
+                <Text style={styles.statusTitle}>Current Limitations</Text>
+              </View>
+              <View style={styles.statusList}>
+                <View style={styles.statusItem}>
+                  <Text style={styles.statusBullet}>•</Text>
+                  <Text style={styles.statusText}>Can't subscribe to channels in-app</Text>
+                </View>
+                <View style={styles.statusItem}>
+                  <Text style={styles.statusBullet}>•</Text>
+                  <Text style={styles.statusText}>Can't like/dislike videos in-app</Text>
+                </View>
+                <View style={styles.statusItem}>
+                  <Text style={styles.statusBullet}>•</Text>
+                  <Text style={styles.statusText}>Can't post comments in-app</Text>
+                </View>
+              </View>
+              <Text style={styles.limitationsNote}>
+                These actions need to be done on YouTube directly
+              </Text>
+            </View>
+          </View>
         </ControlCard>
 
         {/* Footer */}
@@ -411,6 +744,140 @@ const styles = StyleSheet.create({
     fontSize: 14,
     fontWeight: '600',
   },
+  
+  // Subscriptions styles
+  subscriptionsLoading: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    padding: 20,
+  },
+  loadingText: {
+    marginLeft: 10,
+    color: '#666',
+    fontSize: 14,
+  },
+  subscriptionsError: {
+    alignItems: 'center',
+    padding: 20,
+  },
+  errorText: {
+    color: '#f44336',
+    fontSize: 14,
+    marginBottom: 10,
+  },
+  retryButton: {
+    backgroundColor: '#f44336',
+    paddingHorizontal: 16,
+    paddingVertical: 8,
+    borderRadius: 6,
+  },
+  retryButtonText: {
+    color: 'white',
+    fontSize: 12,
+    fontWeight: '600',
+  },
+  subscriptionsGrid: {
+    paddingVertical: 8,
+  },
+  subscriptionItem: {
+    flex: 1,
+    margin: 4,
+    alignItems: 'center',
+    backgroundColor: '#f8f9fa',
+    borderRadius: 8,
+    padding: 8,
+    position: 'relative',
+  },
+  subscriptionThumbnail: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    marginBottom: 8,
+  },
+  subscriptionTitle: {
+    fontSize: 11,
+    fontWeight: '500',
+    color: '#333',
+    textAlign: 'center',
+    lineHeight: 14,
+  },
+  newBadge: {
+    position: 'absolute',
+    top: 4,
+    right: 4,
+    backgroundColor: '#FF0000',
+    borderRadius: 8,
+    minWidth: 16,
+    height: 16,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  newBadgeText: {
+    color: 'white',
+    fontSize: 10,
+    fontWeight: 'bold',
+  },
+  subscriptionsActions: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginTop: 12,
+    paddingTop: 12,
+    borderTopWidth: 1,
+    borderTopColor: '#f0f0f0',
+  },
+  showMoreButton: {
+    backgroundColor: '#e9ecef',
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    borderRadius: 6,
+  },
+  showMoreButtonText: {
+    color: '#333',
+    fontSize: 12,
+    fontWeight: '500',
+  },
+  viewAllButton: {
+    backgroundColor: '#FF0000',
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    borderRadius: 6,
+  },
+  viewAllButtonText: {
+    color: 'white',
+    fontSize: 12,
+    fontWeight: '600',
+  },
+  noSubscriptions: {
+    alignItems: 'center',
+    padding: 20,
+  },
+  noSubscriptionsText: {
+    fontSize: 16,
+    color: '#333',
+    fontWeight: '600',
+    marginBottom: 4,
+  },
+  noSubscriptionsSubtext: {
+    fontSize: 14,
+    color: '#666',
+    textAlign: 'center',
+    marginBottom: 16,
+  },
+  exploreButton: {
+    backgroundColor: '#FF0000',
+    paddingHorizontal: 20,
+    paddingVertical: 10,
+    borderRadius: 20,
+  },
+  exploreButtonText: {
+    color: 'white',
+    fontSize: 14,
+    fontWeight: '600',
+  },
+
+  // Existing styles continue...
   presetsContainer: {
     flexDirection: 'row',
     paddingRight: 16,
@@ -526,6 +993,56 @@ const styles = StyleSheet.create({
     fontSize: 12,
     color: '#999',
     marginTop: 4,
+  },
+  
+  // Platform Status Styles
+  platformStatusContainer: {
+    paddingVertical: 8,
+  },
+  statusSection: {
+    marginBottom: 16,
+  },
+  statusSectionLast: {
+    marginBottom: 0,
+  },
+  statusHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: 8,
+  },
+  statusIconSuccess: {
+    fontSize: 18,
+    marginRight: 8,
+  },
+  statusIconWarning: {
+    fontSize: 18,
+    marginRight: 8,
+  },
+  statusTitle: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: '#333',
+  },
+  statusList: {
+    marginLeft: 26,
+  },
+  statusItem: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    marginBottom: 4,
+  },
+  statusBullet: {
+    fontSize: 16,
+    color: '#666',
+    marginRight: 8,
+    marginTop: 1,
+  },
+  limitationsNote: {
+    fontSize: 12,
+    color: '#999',
+    fontStyle: 'italic',
+    marginLeft: 26,
+    marginTop: 8,
   },
 });
 

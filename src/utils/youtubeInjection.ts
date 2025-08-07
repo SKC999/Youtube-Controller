@@ -40,6 +40,67 @@ export const generateYouTubeCSS = (settings: AppSettings, isProduction: boolean 
     }
   `;
 
+  // NEW: Hide sign-in related elements (JUST ADDING THE MISSING BUTTON SELECTORS)
+  css += `
+    /* Hide sign-in header, promo content, and touch feedback elements */
+    .sign-in-header.cbox,
+    a.sign-in-header.cbox,
+    .promo-content,
+    .yt-spec-touch-feedback-shape__fill,
+    .yt-spec-touch-feedback-shape__stroke,
+    
+    /* ADD: Hide the specific sign-in button renderer */
+    ytm-button-renderer.sign-in-link,
+    ytm-button-renderer[class*="sign-in"],
+    
+    /* Additional sign-in related elements that might appear */
+    .sign-in-promo,
+    .signin-promo,
+    .promo-signin,
+    .sign-in-container,
+    .signin-container,
+    
+    /* Hide the entire sign-in prompts and overlays */
+    .promo-title,
+    .promo-subtitle,
+    .sign-in-header-text,
+    
+    /* Hide sign-in icons and buttons in headers */
+    .sign-in-icon,
+    c3-icon.sign-in-icon,
+    
+    /* Target parent containers that might contain sign-in prompts */
+    [class*="sign-in"][class*="promo"],
+    [class*="signin"][class*="promo"],
+    
+    /* Hide touch feedback for sign-in elements specifically */
+    .sign-in-header .yt-spec-touch-feedback-shape__fill,
+    .sign-in-header + .yt-spec-touch-feedback-shape__fill,
+    .sign-in-header .yt-spec-touch-feedback-shape__stroke,
+    .sign-in-header + .yt-spec-touch-feedback-shape__stroke,
+    
+    /* Hide any promotional banners encouraging sign-in */
+    .promotional-banner[aria-label*="sign" i],
+    .promotional-banner[aria-label*="account" i] {
+      display: none !important;
+      visibility: hidden !important;
+      opacity: 0 !important;
+      height: 0 !important;
+      width: 0 !important;
+      overflow: hidden !important;
+      position: absolute !important;
+      left: -9999px !important;
+    }
+    
+    /* Also hide parent containers if they only contain sign-in content */
+    .ytd-consent-bump-v2-lightbox,
+    .consent-bump-v2-lightbox,
+    ytd-consent-bump-v2-lightbox {
+      display: none !important;
+      visibility: hidden !important;
+    }
+  `;
+
   // Hide recommendations on home page - BUT allow temporary bypass and NEVER affect subscriptions
   if (!settings.showRecommendations) {
     css += `

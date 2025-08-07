@@ -9,6 +9,7 @@ import {
   ActivityIndicator,
   Dimensions,
   Vibration,
+  Linking,
 } from 'react-native';
 import { WebView } from 'react-native-webview';
 import { StackScreenProps } from '@react-navigation/stack';
@@ -59,6 +60,7 @@ const YouTubeScreen: React.FC<YouTubeScreenProps> = ({ navigation, route }) => {
   const [currentUrl, setCurrentUrl] = useState('https://m.youtube.com');
   const [currentPageType, setCurrentPageType] = useState<string>('home');
   const [showDragHint, setShowDragHint] = useState(false);
+  const [injectionRetryCount, setInjectionRetryCount] = useState(0);
 
   // Animated values for movable button
   const translateX = useSharedValue(0);
@@ -106,13 +108,129 @@ const YouTubeScreen: React.FC<YouTubeScreenProps> = ({ navigation, route }) => {
     }
   }, [settings, isLoading, hasInjected, currentPageType]);
 
+  // Enhanced injection script that includes video playback fixes
+  const createEnhancedInjectionScript = () => {
+    const baseScript = createInjectionScript(settings, isAuthenticated);
+    
+    // Add video playback fixes
+    const videoPlaybackFixes = `
+      // YouTube video playback fixes
+      (function() {
+        try {
+          console.log('[YT Controller] Applying video playback fixes...');
+          
+          // Fix for 1-minute playback issue
+          // Override visibility API to prevent YouTube from pausing
+          Object.defineProperty(document, 'visibilityState', {
+            get: () => 'visible',
+            configurable: true
+          });
+          
+          Object.defineProperty(document, 'hidden', {
+            get: () => false,
+            configurable: true
+          });
+          
+          // Prevent page visibility change events
+          const origAddEventListener = document.addEventListener;
+          document.addEventListener = function(type, listener, options) {
+            if (type === 'visibilitychange' || type === 'webkitvisibilitychange') {
+              console.log('[YT Controller] Blocked visibility change listener');
+              return;
+            }
+            return origAddEventListener.call(this, type, listener, options);
+          };
+          
+          // Keep video playing by simulating user interaction
+          let videoKeepAliveInterval = null;
+          
+          function keepVideoPlaying() {
+            const video = document.querySelector('video');
+            if (video && video.paused && video.currentTime > 0) {
+              console.log('[YT Controller] Resuming paused video...');
+              video.play().catch(e => console.log('[YT Controller] Play prevented:', e));
+            }
+          }
+          
+          // Monitor for video elements
+          function setupVideoMonitoring() {
+            const observer = new MutationObserver((mutations) => {
+              mutations.forEach((mutation) => {
+                mutation.addedNodes.forEach((node) => {
+                  if (node.nodeName === 'VIDEO') {
+                    console.log('[YT Controller] Video element detected');
+                    
+                    // Clear any existing interval
+                    if (videoKeepAliveInterval) {
+                      clearInterval(videoKeepAliveInterval);
+                    }
+                    
+                    // Setup keep-alive interval
+                    videoKeepAliveInterval = setInterval(keepVideoPlaying, 5000);
+                    
+                    // Add event listeners to the video
+                    node.addEventListener('pause', (e) => {
+                      // Check if pause was automatic (not user-initiated)
+                      if (node.currentTime > 0 && !node.ended) {
+                        console.log('[YT Controller] Video paused, attempting to resume...');
+                        setTimeout(() => {
+                          if (node.paused && !node.ended) {
+                            node.play().catch(err => console.log('[YT Controller] Resume failed:', err));
+                          }
+                        }, 100);
+                      }
+                    });
+                    
+                    // Prevent automatic quality changes that might interrupt playback
+                    node.addEventListener('loadstart', () => {
+                      console.log('[YT Controller] Video loading...');
+                    });
+                  }
+                });
+              });
+            });
+            
+            observer.observe(document.body, { childList: true, subtree: true });
+          }
+          
+          setupVideoMonitoring();
+          
+          // Fix YouTube's bot detection
+          if (window.navigator) {
+            Object.defineProperty(navigator, 'webdriver', {
+              get: () => undefined,
+              configurable: true
+            });
+          }
+          
+          // Simulate user activity periodically
+          setInterval(() => {
+            // Dispatch a fake user interaction event
+            document.dispatchEvent(new MouseEvent('mousemove', {
+              bubbles: true,
+              cancelable: true,
+              clientX: Math.random() * window.innerWidth,
+              clientY: Math.random() * window.innerHeight
+            }));
+          }, 30000); // Every 30 seconds
+          
+          console.log('[YT Controller] Video playback fixes applied');
+          
+        } catch (error) {
+          console.error('[YT Controller] Error applying video fixes:', error);
+        }
+      })();
+    `;
+    
+    // Combine the scripts
+    return baseScript.replace('true;', videoPlaybackFixes + '\ntrue;');
+  };
+
   const injectCustomCSS = () => {
     if (!webViewRef.current) return;
     
     try {
-      // Use the original injection script but disable any floating buttons
-      // since YouTube has its own subscription tab and we have our own controls
-      const script = createInjectionScript(settings, false); // Pass false to disable subscription button creation
+      const script = createEnhancedInjectionScript();
       webViewRef.current.injectJavaScript(script);
       
       // Remove any subscription or control buttons created by injection
@@ -139,14 +257,64 @@ const YouTubeScreen: React.FC<YouTubeScreenProps> = ({ navigation, route }) => {
         `);
       }, 1000);
       
-      console.log('[YT Screen] CSS injection completed (UI elements disabled)');
+      console.log('[YT Screen] CSS injection completed with video fixes');
     } catch (error) {
       console.error('[YT Screen] Injection error:', error);
-      Alert.alert('Settings Error', 'Failed to apply settings. Please refresh the page.');
+      
+      // Retry injection if it fails
+      if (injectionRetryCount < 3) {
+        setInjectionRetryCount(injectionRetryCount + 1);
+        setTimeout(() => {
+          setHasInjected(false);
+        }, 1000);
+      } else {
+        Alert.alert('Settings Error', 'Failed to apply settings. Please refresh the page.');
+      }
     }
   };
 
-  // Simplified message handler
+  // Handle opening Safari for subscribing
+  const handleOpenSafariToSubscribe = async (data: any) => {
+    try {
+      const { channelTitle, url } = data;
+      
+      Alert.alert(
+        'Subscribe in Safari',
+        `You currently can't subscribe in this app as such, we'll open Safari where you can sign in to YouTube and subscribe. You can return to the app after subscribing.`,
+        [
+          {
+            text: 'Cancel',
+            style: 'cancel',
+          },
+          {
+            text: 'Open Safari',
+            onPress: async () => {
+              try {
+                const supported = await Linking.canOpenURL(url);
+                if (supported) {
+                  await Linking.openURL(url);
+                  console.log('Opened Safari for subscription:', url);
+                } else {
+                  Alert.alert('Error', 'Unable to open Safari');
+                }
+              } catch (error) {
+                console.error('Failed to open Safari:', error);
+                Alert.alert(
+                  'Error', 
+                  'Failed to open Safari. You can manually visit the channel to subscribe.'
+                );
+              }
+            },
+          },
+        ]
+      );
+    } catch (error) {
+      console.error('Error handling Safari subscribe:', error);
+      Alert.alert('Error', 'Failed to process subscribe request');
+    }
+  };
+
+  // Enhanced message handler
   const handleMessage = (event: any) => {
     try {
       const data = JSON.parse(event.nativeEvent.data);
@@ -155,6 +323,12 @@ const YouTubeScreen: React.FC<YouTubeScreenProps> = ({ navigation, route }) => {
         case 'injection-success':
           console.log('✓ CSS injection successful');
           setHasInjected(true);
+          setInjectionRetryCount(0); // Reset retry count on success
+          break;
+          
+        case 'open-in-safari-to-subscribe':
+          console.log('🌐 Subscribe button clicked - opening Safari');
+          handleOpenSafariToSubscribe(data);
           break;
           
         case 'error':
@@ -194,6 +368,7 @@ const YouTubeScreen: React.FC<YouTubeScreenProps> = ({ navigation, route }) => {
 
   const refreshInjection = () => {
     setHasInjected(false);
+    setInjectionRetryCount(0);
     setTimeout(() => {
       if (webViewRef.current) {
         injectCustomCSS();
@@ -251,13 +426,60 @@ const YouTubeScreen: React.FC<YouTubeScreenProps> = ({ navigation, route }) => {
     setShowControls(!showControls);
   };
 
-  const userAgent = 'Mozilla/5.0 (Linux; Android 10; Mobile) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.120 Mobile Safari/537.36';
+  // Updated user agent to avoid detection as bot
+  const userAgent = 'Mozilla/5.0 (iPhone; CPU iPhone OS 16_6 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/16.6 Mobile/15E148 Safari/604.1';
+
+  // Inject JavaScript to keep session alive
+  const injectedJavaScriptBeforeContentLoaded = `
+    (function() {
+      // Prevent YouTube from detecting WebView
+      delete window.navigator.__proto__.webdriver;
+      Object.defineProperty(navigator, 'webdriver', {
+        get: () => undefined,
+        configurable: true
+      });
+      
+      // Keep session alive
+      window.ytInitialData = window.ytInitialData || {};
+      window.ytInitialPlayerResponse = window.ytInitialPlayerResponse || {};
+      
+      // Override XMLHttpRequest to add auth headers if needed
+      const originalXHR = window.XMLHttpRequest;
+      window.XMLHttpRequest = function() {
+        const xhr = new originalXHR();
+        const originalOpen = xhr.open;
+        xhr.open = function(method, url, ...args) {
+          // Add timestamp to prevent caching
+          if (url && url.includes('youtube.com')) {
+            const separator = url.includes('?') ? '&' : '?';
+            url = url + separator + '_=' + Date.now();
+          }
+          return originalOpen.call(this, method, url, ...args);
+        };
+        return xhr;
+      };
+      
+      console.log('[YT Controller] Pre-injection setup complete');
+    })();
+    true;
+  `;
 
   return (
     <SafeAreaView style={styles.container}>
       <WebView
         ref={webViewRef}
-        source={{ uri: currentUrl }}
+        source={{ 
+          uri: currentUrl,
+          headers: {
+            'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8',
+            'Accept-Language': 'en-US,en;q=0.9',
+            'Cache-Control': 'no-cache',
+            'Pragma': 'no-cache',
+            'Upgrade-Insecure-Requests': '1',
+            // Add authorization header if we have a token
+            ...(user?.accessToken ? { 'Authorization': `Bearer ${user.accessToken}` } : {})
+          }
+        }}
         style={styles.webview}
         onLoadEnd={handleLoadEnd}
         onNavigationStateChange={handleNavigationStateChange}
@@ -272,8 +494,29 @@ const YouTubeScreen: React.FC<YouTubeScreenProps> = ({ navigation, route }) => {
         thirdPartyCookiesEnabled={true}
         sharedCookiesEnabled={true}
         userAgent={userAgent}
+        // Add these props to improve video playback
+        allowsFullscreenVideo={true}
+        allowsProtectedMedia={true}
+        originWhitelist={['*']}
+        injectedJavaScriptBeforeContentLoaded={injectedJavaScriptBeforeContentLoaded}
+        // Prevent WebView from being recycled
+        androidLayerType="hardware"
+        cacheEnabled={true}
+        cacheMode="LOAD_DEFAULT"
+        // Add these for better cookie handling
+        incognito={false}
+        // Inject auth cookies if available
+        injectedJavaScript={user?.accessToken ? `
+          document.cookie = "CONSENT=YES+; domain=.youtube.com; path=/";
+          true;
+        ` : undefined}
         onError={(error) => {
+          console.error('WebView error:', error);
           Alert.alert('Error', 'Failed to load YouTube. Please check your internet connection.');
+        }}
+        onHttpError={(syntheticEvent) => {
+          const { nativeEvent } = syntheticEvent;
+          console.warn('HTTP error', nativeEvent);
         }}
         renderLoading={() => (
           <View style={styles.loadingContainer}>
@@ -314,52 +557,47 @@ const YouTubeScreen: React.FC<YouTubeScreenProps> = ({ navigation, route }) => {
       )}
 
       {/* Control Panel */}
-      {/* Control Panel */}
-{showControls && (
-  <View style={styles.controlPanel}>
-    <View style={styles.statusInfo}>
-      <Text style={styles.statusTitle}>YouTube Controller</Text>
-      <Text style={styles.statusText}>
-        Mode: {getCurrentMode()} • Page: {currentPageType}
-      </Text>
-      <Text style={styles.statusDetails}>
-        {hasInjected ? '✅ Settings Active' : '⏳ Loading...'}
-      </Text>
-    </View>
+      {showControls && (
+        <View style={styles.controlPanel}>
+          <View style={styles.statusInfo}>
+            <Text style={styles.statusTitle}>YouTube Controller</Text>
+            <Text style={styles.statusText}>
+              Mode: {getCurrentMode()} • Page: {currentPageType}
+            </Text>
+            <Text style={styles.statusDetails}>
+              {hasInjected ? '✅ Settings Active' : '⏳ Loading...'}
+            </Text>
+          </View>
 
-    <TouchableOpacity
-      style={styles.controlButton}
-      onPress={() => navigation.goBack()}
-    >
-      <Text style={styles.controlButtonText}>← Back to Home</Text>
-    </TouchableOpacity>
+          <TouchableOpacity
+            style={styles.controlButton}
+            onPress={() => navigation.goBack()}
+          >
+            <Text style={styles.controlButtonText}>← Back to Home</Text>
+          </TouchableOpacity>
 
-    {/* REMOVED: Quick Settings button */}
+          <TouchableOpacity
+            style={styles.controlButton}
+            onPress={() => navigation.navigate('Settings')}
+          >
+            <Text style={styles.controlButtonText}>⚙️ Advanced Settings</Text>
+          </TouchableOpacity>
 
-    <TouchableOpacity
-      style={styles.controlButton}
-      onPress={() => navigation.navigate('Settings')}
-    >
-      <Text style={styles.controlButtonText}>⚙️ Advanced Settings</Text>
-    </TouchableOpacity>
+          <TouchableOpacity
+            style={[styles.controlButton, styles.refreshButton]}
+            onPress={refreshInjection}
+          >
+            <Text style={styles.controlButtonText}>🔄 Refresh Settings</Text>
+          </TouchableOpacity>
 
-    <TouchableOpacity
-      style={[styles.controlButton, styles.refreshButton]}
-      onPress={refreshInjection}
-    >
-      <Text style={styles.controlButtonText}>🔄 Refresh Settings</Text>
-    </TouchableOpacity>
-
-    <TouchableOpacity
-      style={[styles.controlButton, styles.closeButton]}
-      onPress={() => setShowControls(false)}
-    >
-      <Text style={styles.controlButtonText}>✕ Close</Text>
-    </TouchableOpacity>
-  </View>
-)}
-
-{/* REMOVED: QuickSettings Modal */}
+          <TouchableOpacity
+            style={[styles.controlButton, styles.closeButton]}
+            onPress={() => setShowControls(false)}
+          >
+            <Text style={styles.controlButtonText}>✕ Close</Text>
+          </TouchableOpacity>
+        </View>
+      )}
 
       {/* Quick Settings Modal */}
       <QuickSettings
@@ -383,6 +621,8 @@ const YouTubeScreen: React.FC<YouTubeScreenProps> = ({ navigation, route }) => {
           </Text>
           <Text style={styles.loadingDetails}>
             Applying {getCurrentMode()} settings...
+          </Text>
+          <Text style={styles.subscribeNote}>
           </Text>
         </View>
       )}
@@ -546,6 +786,11 @@ const styles = StyleSheet.create({
     color: '#4CAF50',
     fontSize: 11,
   },
+  subscribeInfo: {
+    color: '#FFB74D',
+    fontSize: 11,
+    marginTop: 4,
+  },
   controlButton: {
     padding: 14,
     borderRadius: 8,
@@ -600,6 +845,13 @@ const styles = StyleSheet.create({
     color: '#FF0000',
     fontSize: 12,
     marginTop: 4,
+  },
+  subscribeNote: {
+    color: '#FFB74D',
+    fontSize: 12,
+    marginTop: 8,
+    textAlign: 'center',
+    maxWidth: 280,
   },
 });
 

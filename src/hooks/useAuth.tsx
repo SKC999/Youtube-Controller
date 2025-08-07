@@ -29,6 +29,7 @@ interface AuthContextType {
   signIn: () => Promise<boolean>;
   signOut: () => Promise<void>;
   handleManualToken: (token: string) => Promise<boolean>;
+  refreshAccessToken: () => Promise<boolean>;
 }
 
 const AuthContext = createContext<AuthContextType | null>(null);
@@ -208,6 +209,54 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
     }
   }, [fetchUserInfo]);
 
+  const refreshAccessToken = useCallback(async (): Promise<boolean> => {
+    try {
+      const refreshToken = await AsyncStorage.getItem('refreshToken');
+      if (!refreshToken) {
+        console.log('No refresh token available');
+        return false;
+      }
+
+      console.log('Refreshing access token...');
+      const response = await fetch('https://oauth2.googleapis.com/token', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/x-www-form-urlencoded',
+        },
+        body: new URLSearchParams({
+          client_id: ENV.GOOGLE_IOS_CLIENT_ID,
+          refresh_token: refreshToken,
+          grant_type: 'refresh_token',
+        }).toString(),
+      });
+
+      if (response.ok) {
+        const tokenData = await response.json();
+        const newAccessToken = tokenData.access_token;
+        
+        // Update stored tokens
+        await AsyncStorage.setItem('accessToken', newAccessToken);
+        
+        // Update user with new token
+        if (user) {
+          const updatedUser = { ...user, accessToken: newAccessToken };
+          setUser(updatedUser);
+          await AsyncStorage.setItem('user', JSON.stringify(updatedUser));
+        }
+        
+        console.log('Access token refreshed successfully');
+        return true;
+      } else {
+        const errorText = await response.text();
+        console.error('Token refresh failed:', response.status, errorText);
+        return false;
+      }
+    } catch (error) {
+      console.error('Error refreshing token:', error);
+      return false;
+    }
+  }, [user]);
+
   const signOut = useCallback(async (): Promise<void> => {
     try {
       setUser(null);
@@ -248,6 +297,7 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
     signIn,
     signOut,
     handleManualToken,
+    refreshAccessToken,
   };
 
   return (
