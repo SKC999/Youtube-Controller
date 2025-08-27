@@ -108,19 +108,91 @@ const YouTubeScreen: React.FC<YouTubeScreenProps> = ({ navigation, route }) => {
     }
   }, [settings, isLoading, hasInjected, currentPageType]);
 
-  // Enhanced injection script that includes video playback fixes
+  // Enhanced injection script with AGGRESSIVE FULLSCREEN FIX
   const createEnhancedInjectionScript = () => {
     const baseScript = createInjectionScript(settings, isAuthenticated);
     
-    // Add video playback fixes
+    // Add video playback fixes - AGGRESSIVE FULLSCREEN FIX
     const videoPlaybackFixes = `
-      // YouTube video playback fixes
+      // YouTube video playback fixes - AGGRESSIVE FULLSCREEN FIX
       (function() {
         try {
-          console.log('[YT Controller] Applying video playback fixes...');
+          console.log('[YT Controller] Applying video playback fixes - Aggressive fullscreen fix...');
           
-          // Fix for 1-minute playback issue
-          // Override visibility API to prevent YouTube from pausing
+          // Track user interactions to distinguish manual pauses
+          let lastUserInteraction = Date.now();
+          let userInitiatedPause = false;
+          let isInFullscreen = false;
+          let videoElement = null;
+          
+          // AGGRESSIVE: Check multiple ways to detect fullscreen
+          function checkIfFullscreen() {
+            // Standard fullscreen API
+            if (document.fullscreenElement || document.webkitFullscreenElement) {
+              return true;
+            }
+            
+            // YouTube's custom fullscreen classes
+            const player = document.querySelector('.html5-video-player');
+            if (player) {
+              if (player.classList.contains('ytp-fullscreen') ||
+                  player.classList.contains('ytp-player-fullscreen') ||
+                  player.classList.contains('ytp-fullscreen-mode')) {
+                return true;
+              }
+            }
+            
+            // Mobile YouTube specific
+            const app = document.querySelector('ytm-app');
+            if (app && app.hasAttribute('fullscreen')) {
+              return true;
+            }
+            
+            // Check if video is taking full viewport
+            if (videoElement) {
+              const videoRect = videoElement.getBoundingClientRect();
+              const viewportHeight = window.innerHeight;
+              const viewportWidth = window.innerWidth;
+              
+              // If video covers more than 90% of viewport, consider it fullscreen
+              if (videoRect.width >= viewportWidth * 0.9 && 
+                  videoRect.height >= viewportHeight * 0.9) {
+                return true;
+              }
+            }
+            
+            // Check for theater mode or expanded player
+            const theater = document.querySelector('[theater]');
+            if (theater || document.body.classList.contains('ytp-theater-mode')) {
+              return true;
+            }
+            
+            return false;
+          }
+          
+          // Update fullscreen state continuously
+          function updateFullscreenState() {
+            const wasFullscreen = isInFullscreen;
+            isInFullscreen = checkIfFullscreen();
+            
+            if (wasFullscreen !== isInFullscreen) {
+              console.log('[YT Controller] Fullscreen state changed to:', isInFullscreen);
+              
+              // IMPORTANT: Reset user interaction flag when entering/exiting fullscreen
+              if (isInFullscreen) {
+                // Entering fullscreen - be more permissive with pauses
+                userInitiatedPause = true;
+                setTimeout(() => {
+                  userInitiatedPause = false;
+                }, 3000); // Give 3 seconds after entering fullscreen
+              }
+            }
+          }
+          
+          // Check fullscreen state frequently
+          setInterval(updateFullscreenState, 250); // Check every 250ms
+          
+          // Fix for visibility API to prevent automatic pausing
           Object.defineProperty(document, 'visibilityState', {
             get: () => 'visible',
             configurable: true
@@ -141,16 +213,45 @@ const YouTubeScreen: React.FC<YouTubeScreenProps> = ({ navigation, route }) => {
             return origAddEventListener.call(this, type, listener, options);
           };
           
-          // Keep video playing by simulating user interaction
-          let videoKeepAliveInterval = null;
-          
-          function keepVideoPlaying() {
-            const video = document.querySelector('video');
-            if (video && video.paused && video.currentTime > 0) {
-              console.log('[YT Controller] Resuming paused video...');
-              video.play().catch(e => console.log('[YT Controller] Play prevented:', e));
-            }
-          }
+          // AGGRESSIVE: Track ALL interactions
+          ['click', 'touchstart', 'touchend', 'keydown', 'keyup', 'pointerdown', 'pointerup', 'mousedown', 'mouseup'].forEach(eventType => {
+            document.addEventListener(eventType, function(e) {
+              lastUserInteraction = Date.now();
+              
+              // In fullscreen, ANY interaction should be considered user-initiated
+              if (isInFullscreen) {
+                userInitiatedPause = true;
+                console.log('[YT Controller] Fullscreen interaction detected:', eventType);
+                
+                // Keep flag active for 5 seconds in fullscreen
+                setTimeout(() => {
+                  userInitiatedPause = false;
+                }, 5000);
+              } else {
+                // Normal mode - check if it's a video control
+                const target = e.target;
+                const isVideoControl = 
+                  target.closest('.ytp-play-button') ||
+                  target.closest('.ytp-chrome-controls') ||
+                  target.closest('.player-controls-container') ||
+                  target.closest('[aria-label*="Pause" i]') ||
+                  target.closest('[aria-label*="Play" i]') ||
+                  target.closest('[title*="Pause" i]') ||
+                  target.closest('[title*="Play" i]') ||
+                  target.tagName === 'VIDEO' ||
+                  target.closest('video') ||
+                  (e.type === 'keydown' && (e.code === 'Space' || e.key === ' ' || e.code === 'KeyK'));
+                
+                if (isVideoControl) {
+                  userInitiatedPause = true;
+                  console.log('[YT Controller] Control interaction detected');
+                  setTimeout(() => {
+                    userInitiatedPause = false;
+                  }, 2000);
+                }
+              }
+            }, true);
+          });
           
           // Monitor for video elements
           function setupVideoMonitoring() {
@@ -158,32 +259,76 @@ const YouTubeScreen: React.FC<YouTubeScreenProps> = ({ navigation, route }) => {
               mutations.forEach((mutation) => {
                 mutation.addedNodes.forEach((node) => {
                   if (node.nodeName === 'VIDEO') {
+                    videoElement = node; // Store reference to video element
                     console.log('[YT Controller] Video element detected');
                     
-                    // Clear any existing interval
-                    if (videoKeepAliveInterval) {
-                      clearInterval(videoKeepAliveInterval);
-                    }
-                    
-                    // Setup keep-alive interval
-                    videoKeepAliveInterval = setInterval(keepVideoPlaying, 5000);
-                    
-                    // Add event listeners to the video
+                    // Add pause event listener with AGGRESSIVE fullscreen handling
                     node.addEventListener('pause', (e) => {
-                      // Check if pause was automatic (not user-initiated)
-                      if (node.currentTime > 0 && !node.ended) {
-                        console.log('[YT Controller] Video paused, attempting to resume...');
+                      const video = e.target;
+                      const timeSinceInteraction = Date.now() - lastUserInteraction;
+                      
+                      // Update fullscreen state right before checking
+                      updateFullscreenState();
+                      
+                      console.log('[YT Controller] Pause event:', {
+                        isFullscreen: isInFullscreen,
+                        userInitiated: userInitiatedPause,
+                        timeSinceInteraction: timeSinceInteraction,
+                        currentTime: video.currentTime,
+                        ended: video.ended
+                      });
+                      
+                      // AGGRESSIVE: NEVER auto-resume in fullscreen
+                      if (isInFullscreen) {
+                        console.log('[YT Controller] In fullscreen - NOT auto-resuming');
+                        return; // Don't auto-resume at all in fullscreen
+                      }
+                      
+                      // Only auto-resume in normal mode if conditions are met
+                      if (!userInitiatedPause && 
+                          video.currentTime > 0 && 
+                          !video.ended && 
+                          !video.seeking &&
+                          timeSinceInteraction > 500) {
+                        
+                        console.log('[YT Controller] Normal mode automatic pause detected, attempting to resume...');
+                        
                         setTimeout(() => {
-                          if (node.paused && !node.ended) {
-                            node.play().catch(err => console.log('[YT Controller] Resume failed:', err));
+                          // Double-check we're still not in fullscreen
+                          updateFullscreenState();
+                          if (!isInFullscreen && !userInitiatedPause && (Date.now() - lastUserInteraction) > 500) {
+                            video.play().catch(err => {
+                              console.log('[YT Controller] Auto-resume failed:', err);
+                            });
                           }
-                        }, 100);
+                        }, 250);
+                      } else {
+                        console.log('[YT Controller] User-initiated pause or fullscreen - not resuming');
                       }
                     });
                     
-                    // Prevent automatic quality changes that might interrupt playback
-                    node.addEventListener('loadstart', () => {
-                      console.log('[YT Controller] Video loading...');
+                    // Track play events
+                    node.addEventListener('play', (e) => {
+                      updateFullscreenState();
+                      console.log('[YT Controller] Video playing (fullscreen:', isInFullscreen, ')');
+                    });
+                    
+                    // Track seeking
+                    node.addEventListener('seeking', (e) => {
+                      userInitiatedPause = true;
+                      setTimeout(() => {
+                        userInitiatedPause = false;
+                      }, 2000);
+                    });
+                    
+                    // Track direct clicks on video
+                    node.addEventListener('click', (e) => {
+                      userInitiatedPause = true;
+                      lastUserInteraction = Date.now();
+                      console.log('[YT Controller] Direct video click');
+                      setTimeout(() => {
+                        userInitiatedPause = false;
+                      }, 3000);
                     });
                   }
                 });
@@ -195,6 +340,36 @@ const YouTubeScreen: React.FC<YouTubeScreenProps> = ({ navigation, route }) => {
           
           setupVideoMonitoring();
           
+          // Monitor fullscreen changes via mutation observer
+          const fullscreenObserver = new MutationObserver(() => {
+            updateFullscreenState();
+          });
+          
+          // Observe changes to player and app elements
+          setTimeout(() => {
+            const player = document.querySelector('.html5-video-player');
+            if (player) {
+              fullscreenObserver.observe(player, { 
+                attributes: true, 
+                attributeFilter: ['class'] 
+              });
+            }
+            
+            const app = document.querySelector('ytm-app');
+            if (app) {
+              fullscreenObserver.observe(app, { 
+                attributes: true, 
+                attributeFilter: ['fullscreen'] 
+              });
+            }
+            
+            const body = document.body;
+            fullscreenObserver.observe(body, { 
+              attributes: true, 
+              attributeFilter: ['class'] 
+            });
+          }, 1000);
+          
           // Fix YouTube's bot detection
           if (window.navigator) {
             Object.defineProperty(navigator, 'webdriver', {
@@ -203,18 +378,27 @@ const YouTubeScreen: React.FC<YouTubeScreenProps> = ({ navigation, route }) => {
             });
           }
           
-          // Simulate user activity periodically
+          // Simulate user activity ONLY in normal mode
           setInterval(() => {
-            // Dispatch a fake user interaction event
-            document.dispatchEvent(new MouseEvent('mousemove', {
-              bubbles: true,
-              cancelable: true,
-              clientX: Math.random() * window.innerWidth,
-              clientY: Math.random() * window.innerHeight
-            }));
-          }, 30000); // Every 30 seconds
+            updateFullscreenState();
+            
+            // NEVER simulate activity in fullscreen
+            if (isInFullscreen) {
+              return;
+            }
+            
+            const video = document.querySelector('video');
+            if (video && !video.paused && (Date.now() - lastUserInteraction) > 30000) {
+              document.dispatchEvent(new MouseEvent('mousemove', {
+                bubbles: true,
+                cancelable: true,
+                clientX: Math.random() * window.innerWidth,
+                clientY: Math.random() * window.innerHeight
+              }));
+            }
+          }, 45000);
           
-          console.log('[YT Controller] Video playback fixes applied');
+          console.log('[YT Controller] Video playback fixes applied - Aggressive fullscreen protection enabled');
           
         } catch (error) {
           console.error('[YT Controller] Error applying video fixes:', error);
