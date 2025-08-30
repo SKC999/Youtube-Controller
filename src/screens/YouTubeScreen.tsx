@@ -16,6 +16,7 @@ import { StackScreenProps } from '@react-navigation/stack';
 import { RootStackParamList } from '../../App';
 import { useSettings } from '../hooks/useSettings';
 import { useAuth } from '../hooks/useAuth';
+import { useUserAgentRotation } from '../hooks/useUserAgentRotation';
 import { createInjectionScript } from '../utils/youtubeInjection';
 import QuickSettings from '../components/QuickSettings';
 import { PanGestureHandler, State } from 'react-native-gesture-handler';
@@ -30,10 +31,36 @@ import Animated, {
 type YouTubeScreenProps = StackScreenProps<RootStackParamList, 'YouTube'>;
 
 const YouTubeScreen: React.FC<YouTubeScreenProps> = ({ navigation, route }) => {
+  // ALL HOOKS MUST BE CALLED AT THE TOP - NO CONDITIONAL HOOKS!
   const webViewRef = useRef<WebView>(null);
   const { settings, getCurrentMode } = useSettings();
   const { user, isAuthenticated } = useAuth();
   
+  // Use the user agent rotation hook
+  const {
+    userAgent,
+    userAgentInfo,
+    loading: userAgentLoading,
+    timeUntilNextRotation,
+    refreshRotation,
+  } = useUserAgentRotation();
+
+  // State management - ALL declared at the top
+  const [isLoading, setIsLoading] = useState(true);
+  const [showControls, setShowControls] = useState(false);
+  const [showQuickSettings, setShowQuickSettings] = useState(false);
+  const [hasInjected, setHasInjected] = useState(false);
+  const [currentUrl, setCurrentUrl] = useState('https://m.youtube.com');
+  const [currentPageType, setCurrentPageType] = useState<string>('home');
+  const [showDragHint, setShowDragHint] = useState(false);
+  const [injectionRetryCount, setInjectionRetryCount] = useState(0);
+
+  // Animated values for movable button
+  const translateX = useSharedValue(0);
+  const translateY = useSharedValue(0);
+  const buttonScale = useSharedValue(1);
+
+  // Effects - ALL at the top level
   // Redirect to auth if not signed in
   useEffect(() => {
     if (!isAuthenticated) {
@@ -52,42 +79,6 @@ const YouTubeScreen: React.FC<YouTubeScreenProps> = ({ navigation, route }) => {
     }
   }, [isAuthenticated, navigation]);
 
-  // State management
-  const [isLoading, setIsLoading] = useState(true);
-  const [showControls, setShowControls] = useState(false);
-  const [showQuickSettings, setShowQuickSettings] = useState(false);
-  const [hasInjected, setHasInjected] = useState(false);
-  const [currentUrl, setCurrentUrl] = useState('https://m.youtube.com');
-  const [currentPageType, setCurrentPageType] = useState<string>('home');
-  const [showDragHint, setShowDragHint] = useState(false);
-  const [injectionRetryCount, setInjectionRetryCount] = useState(0);
-
-  // Animated values for movable button
-  const translateX = useSharedValue(0);
-  const translateY = useSharedValue(0);
-  const buttonScale = useSharedValue(1);
-
-  // Don't render anything if not authenticated
-  if (!isAuthenticated) {
-    return (
-      <SafeAreaView style={styles.authRequiredContainer}>
-        <View style={styles.authRequiredContent}>
-          <Text style={styles.authRequiredIcon}>🔒</Text>
-          <Text style={styles.authRequiredTitle}>Authentication Required</Text>
-          <Text style={styles.authRequiredMessage}>
-            Please sign in to access YouTube Controller features
-          </Text>
-          <TouchableOpacity
-            style={styles.signInButton}
-            onPress={() => navigation.replace('Auth')}
-          >
-            <Text style={styles.signInButtonText}>Go to Sign In</Text>
-          </TouchableOpacity>
-        </View>
-      </SafeAreaView>
-    );
-  }
-
   // Handle navigation parameters for direct channel/video access
   useEffect(() => {
     if (route?.params) {
@@ -102,11 +93,11 @@ const YouTubeScreen: React.FC<YouTubeScreenProps> = ({ navigation, route }) => {
 
   // Injection with better timing and no duplicate buttons
   useEffect(() => {
-    if (!isLoading && webViewRef.current && !hasInjected) {
+    if (!isLoading && webViewRef.current && !hasInjected && userAgent) {
       injectCustomCSS();
       setHasInjected(true);
     }
-  }, [settings, isLoading, hasInjected, currentPageType]);
+  }, [settings, isLoading, hasInjected, currentPageType, userAgent]);
 
   // Enhanced injection script with AGGRESSIVE FULLSCREEN FIX
   const createEnhancedInjectionScript = () => {
@@ -118,6 +109,7 @@ const YouTubeScreen: React.FC<YouTubeScreenProps> = ({ navigation, route }) => {
       (function() {
         try {
           console.log('[YT Controller] Applying video playback fixes - Aggressive fullscreen fix...');
+          console.log('[YT Controller] Using User Agent: ${userAgentInfo?.deviceInfo || 'Unknown Device'}');
           
           // Track user interactions to distinguish manual pauses
           let lastUserInteraction = Date.now();
@@ -278,33 +270,18 @@ const YouTubeScreen: React.FC<YouTubeScreenProps> = ({ navigation, route }) => {
                         ended: video.ended
                       });
                       
-                      // AGGRESSIVE: NEVER auto-resume in fullscreen
-                      if (isInFullscreen) {
-                        console.log('[YT Controller] In fullscreen - NOT auto-resuming');
-                        return; // Don't auto-resume at all in fullscreen
-                      }
+                      // NEVER auto-resume videos - let user control playback completely
+                      console.log('[YT Controller] Video paused - NO automatic resume will occur');
+                      console.log('[YT Controller] Pause details:', {
+                        isFullscreen: isInFullscreen,
+                        userInitiated: userInitiatedPause,
+                        timeSinceInteraction: timeSinceInteraction,
+                        currentTime: video.currentTime,
+                        ended: video.ended,
+                        autoResumeDisabled: true
+                      });
                       
-                      // Only auto-resume in normal mode if conditions are met
-                      if (!userInitiatedPause && 
-                          video.currentTime > 0 && 
-                          !video.ended && 
-                          !video.seeking &&
-                          timeSinceInteraction > 500) {
-                        
-                        console.log('[YT Controller] Normal mode automatic pause detected, attempting to resume...');
-                        
-                        setTimeout(() => {
-                          // Double-check we're still not in fullscreen
-                          updateFullscreenState();
-                          if (!isInFullscreen && !userInitiatedPause && (Date.now() - lastUserInteraction) > 500) {
-                            video.play().catch(err => {
-                              console.log('[YT Controller] Auto-resume failed:', err);
-                            });
-                          }
-                        }, 250);
-                      } else {
-                        console.log('[YT Controller] User-initiated pause or fullscreen - not resuming');
-                      }
+                      // All pauses are now respected - no automatic resuming at all
                     });
                     
                     // Track play events
@@ -441,7 +418,7 @@ const YouTubeScreen: React.FC<YouTubeScreenProps> = ({ navigation, route }) => {
         `);
       }, 1000);
       
-      console.log('[YT Screen] CSS injection completed with video fixes');
+      console.log('[YT Screen] CSS injection completed with video fixes using', userAgentInfo?.deviceInfo);
     } catch (error) {
       console.error('[YT Screen] Injection error:', error);
       
@@ -505,7 +482,7 @@ const YouTubeScreen: React.FC<YouTubeScreenProps> = ({ navigation, route }) => {
       
       switch (data.type) {
         case 'injection-success':
-          console.log('✓ CSS injection successful');
+          console.log('✓ CSS injection successful with User Agent:', userAgentInfo?.deviceInfo);
           setHasInjected(true);
           setInjectionRetryCount(0); // Reset retry count on success
           break;
@@ -591,7 +568,7 @@ const YouTubeScreen: React.FC<YouTubeScreenProps> = ({ navigation, route }) => {
         translateY.value = withSpring(-screenHeight/2 + buttonSize/2 + margin);
       }
       if (translateY.value > screenHeight/2 - buttonSize/2 - margin) {
-        translateY.value = withSpring(screenHeight/2 - buttonSize/2 - margin);
+        translateY.value = withSpring(screenHeight/2 - buttonSize/2 + margin);
       }
     },
   });
@@ -609,9 +586,6 @@ const YouTubeScreen: React.FC<YouTubeScreenProps> = ({ navigation, route }) => {
   const handleButtonPress = () => {
     setShowControls(!showControls);
   };
-
-  // Updated user agent to avoid detection as bot
-  const userAgent = 'Mozilla/5.0 (iPhone; CPU iPhone OS 16_6 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/16.6 Mobile/15E148 Safari/604.1';
 
   // Inject JavaScript to keep session alive
   const injectedJavaScriptBeforeContentLoaded = `
@@ -643,11 +617,54 @@ const YouTubeScreen: React.FC<YouTubeScreenProps> = ({ navigation, route }) => {
         return xhr;
       };
       
-      console.log('[YT Controller] Pre-injection setup complete');
+      console.log('[YT Controller] Pre-injection setup complete with User Agent rotation');
     })();
     true;
   `;
 
+  // CONDITIONAL RENDERING LOGIC - Moved to JSX return instead of early returns
+  // This respects the Rules of Hooks by ensuring all hooks run before any conditional rendering
+
+  // Not authenticated case
+  if (!isAuthenticated) {
+    return (
+      <SafeAreaView style={styles.authRequiredContainer}>
+        <View style={styles.authRequiredContent}>
+          <Text style={styles.authRequiredIcon}>🔒</Text>
+          <Text style={styles.authRequiredTitle}>Authentication Required</Text>
+          <Text style={styles.authRequiredMessage}>
+            Please sign in to access YouTube Controller features
+          </Text>
+          <TouchableOpacity
+            style={styles.signInButton}
+            onPress={() => navigation.replace('Auth')}
+          >
+            <Text style={styles.signInButtonText}>Go to Sign In</Text>
+          </TouchableOpacity>
+        </View>
+      </SafeAreaView>
+    );
+  }
+
+  // User agent loading case
+  if (userAgentLoading || !userAgent) {
+    return (
+      <SafeAreaView style={styles.container}>
+        <View style={styles.loadingOverlay}>
+          <ActivityIndicator size="large" color="#FF0000" />
+          <Text style={styles.loadingText}>Initializing YouTube Controller...</Text>
+          <Text style={styles.loadingSubtext}>
+            Setting up secure connection
+          </Text>
+          <Text style={styles.loadingDetails}>
+            Configuring user agent rotation system...
+          </Text>
+        </View>
+      </SafeAreaView>
+    );
+  }
+
+  // Main component render
   return (
     <SafeAreaView style={styles.container}>
       <WebView
@@ -677,7 +694,7 @@ const YouTubeScreen: React.FC<YouTubeScreenProps> = ({ navigation, route }) => {
         mixedContentMode="compatibility"
         thirdPartyCookiesEnabled={true}
         sharedCookiesEnabled={true}
-        userAgent={userAgent}
+        userAgent={userAgent} // Use the rotating user agent
         // Add these props to improve video playback
         allowsFullscreenVideo={true}
         allowsProtectedMedia={true}
@@ -730,16 +747,6 @@ const YouTubeScreen: React.FC<YouTubeScreenProps> = ({ navigation, route }) => {
         </Animated.View>
       </PanGestureHandler>
 
-      {/* Drag Hint Tooltip */}
-      {showDragHint && (
-        <View style={styles.dragHint}>
-          <View style={styles.dragHintBubble}>
-            <Text style={styles.dragHintText}>Drag me around! 👆</Text>
-          </View>
-          <View style={styles.dragHintArrow} />
-        </View>
-      )}
-
       {/* Control Panel */}
       {showControls && (
         <View style={styles.controlPanel}>
@@ -751,6 +758,7 @@ const YouTubeScreen: React.FC<YouTubeScreenProps> = ({ navigation, route }) => {
             <Text style={styles.statusDetails}>
               {hasInjected ? '✅ Settings Active' : '⏳ Loading...'}
             </Text>
+            {/* User Agent Information */}
           </View>
 
           <TouchableOpacity
@@ -806,7 +814,8 @@ const YouTubeScreen: React.FC<YouTubeScreenProps> = ({ navigation, route }) => {
           <Text style={styles.loadingDetails}>
             Applying {getCurrentMode()} settings...
           </Text>
-          <Text style={styles.subscribeNote}>
+          <Text style={styles.userAgentLoadingInfo}>
+            Device: {userAgentInfo?.deviceInfo || 'Configuring...'}
           </Text>
         </View>
       )}
@@ -873,7 +882,6 @@ const styles = StyleSheet.create({
     shadowOffset: { width: 0, height: 4 },
     shadowOpacity: 0.3,
     shadowRadius: 5,
-    // Remove elevation here since it's handled in animated style
   },
   floatingButtonInner: {
     width: '100%',
@@ -899,40 +907,6 @@ const styles = StyleSheet.create({
     height: 3,
     borderRadius: 1.5,
     backgroundColor: 'rgba(255, 255, 255, 0.5)',
-  },
-  dragHint: {
-    position: 'absolute',
-    bottom: 100,
-    right: 85,
-    zIndex: 999999,
-  },
-  dragHintBubble: {
-    backgroundColor: 'rgba(0, 0, 0, 0.9)',
-    paddingHorizontal: 12,
-    paddingVertical: 8,
-    borderRadius: 8,
-    minWidth: 120,
-  },
-  dragHintText: {
-    color: 'white',
-    fontSize: 12,
-    fontWeight: '500',
-    textAlign: 'center',
-  },
-  dragHintArrow: {
-    position: 'absolute',
-    bottom: -5,
-    right: 20,
-    width: 0,
-    height: 0,
-    backgroundColor: 'transparent',
-    borderStyle: 'solid',
-    borderLeftWidth: 5,
-    borderRightWidth: 5,
-    borderTopWidth: 5,
-    borderLeftColor: 'transparent',
-    borderRightColor: 'transparent',
-    borderTopColor: 'rgba(0, 0, 0, 0.9)',
   },
   controlPanel: {
     position: 'absolute',
@@ -970,19 +944,21 @@ const styles = StyleSheet.create({
     color: '#4CAF50',
     fontSize: 11,
   },
-  subscribeInfo: {
+  userAgentInfo: {
     color: '#FFB74D',
     fontSize: 11,
-    marginTop: 4,
+    marginTop: 2,
+  },
+  rotationInfo: {
+    color: '#81C784',
+    fontSize: 10,
+    marginTop: 2,
   },
   controlButton: {
     padding: 14,
     borderRadius: 8,
     marginVertical: 4,
     backgroundColor: 'rgba(255, 255, 255, 0.1)',
-  },
-  primaryButton: {
-    backgroundColor: 'rgba(255, 0, 0, 0.3)',
   },
   refreshButton: {
     backgroundColor: 'rgba(76, 175, 80, 0.3)',
@@ -1030,12 +1006,11 @@ const styles = StyleSheet.create({
     fontSize: 12,
     marginTop: 4,
   },
-  subscribeNote: {
+  userAgentLoadingInfo: {
     color: '#FFB74D',
     fontSize: 12,
     marginTop: 8,
     textAlign: 'center',
-    maxWidth: 280,
   },
 });
 
