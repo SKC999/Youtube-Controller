@@ -758,7 +758,6 @@ const YouTubeScreen: React.FC<YouTubeScreenProps> = ({ navigation, route }) => {
             <Text style={styles.statusDetails}>
               {hasInjected ? '✅ Settings Active' : '⏳ Loading...'}
             </Text>
-            {/* User Agent Information */}
           </View>
 
           <TouchableOpacity
@@ -813,9 +812,6 @@ const YouTubeScreen: React.FC<YouTubeScreenProps> = ({ navigation, route }) => {
           </Text>
           <Text style={styles.loadingDetails}>
             Applying {getCurrentMode()} settings...
-          </Text>
-          <Text style={styles.userAgentLoadingInfo}>
-            Device: {userAgentInfo?.deviceInfo || 'Configuring...'}
           </Text>
         </View>
       )}
